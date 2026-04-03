@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+*.log
+server.out.log
+server.err.log
+qa-backend.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Prisma
+prisma/elitedial.db
+
+# Stitch (build artifacts)
+stitch-artifacts/
+stitch-assets/

@@ -1,0 +1,132 @@
+import { Router, Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { authenticate } from '../middleware/auth';
+import { requireMinRole } from '../middleware/roles';
+import { signalwireService } from '../services/signalwire';
+
+const router = Router();
+const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
+
+// GET /api/agents — list all agents (supervisor+)
+router.get('/', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
+    const agents = await prisma.user.findMany({
+        select: {
+            id: true, username: true, email: true, firstName: true, lastName: true,
+            role: true, status: true, extension: true, createdAt: true,
+        },
+        orderBy: { lastName: 'asc' },
+    });
+    res.json(agents);
+});
+
+// PATCH /api/agents/:id/status — update availability
+router.patch('/:id/status', authenticate, async (req: Request, res: Response): Promise<void> => {
+    const id = paramValue(req.params.id);
+    const { status } = req.body;
+
+    // Agents can only update their own status; supervisors/admins can update anyone
+    if (req.user!.role === 'agent' && req.user!.id !== id) {
+        res.status(403).json({ error: 'Cannot update another agent\'s status' });
+        return;
+    }
+
+    const validStatuses = ['available', 'break', 'offline', 'on-call'];
+    if (!validStatuses.includes(status)) {
+        res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+        return;
+    }
+
+    const agent = await prisma.user.update({
+        where: { id },
+        data: { status },
+        select: { id: true, username: true, status: true },
+    });
+
+    res.json(agent);
+});
+
+// GET /api/agents/:id/stats — per-agent performance
+router.get('/:id/stats', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
+    const id = paramValue(req.params.id);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [totalCalls, answeredCalls, avgDuration, dispositions] = await Promise.all([
+        prisma.call.count({ where: { agentId: id, createdAt: { gte: today } } }),
+        prisma.call.count({ where: { agentId: id, status: 'completed', createdAt: { gte: today } } }),
+        prisma.call.aggregate({ where: { agentId: id, status: 'completed' }, _avg: { duration: true } }),
+        prisma.call.groupBy({
+            by: ['dispositionId'],
+            where: { agentId: id, createdAt: { gte: today }, dispositionId: { not: null } },
+            _count: true,
+        }),
+    ]);
+
+    res.json({
+        agentId: id,
+        today: {
+            totalCalls,
+            answeredCalls,
+            answerRate: totalCalls > 0 ? ((answeredCalls / totalCalls) * 100).toFixed(1) : '0.0',
+            avgDuration: Math.round(avgDuration._avg?.duration || 0),
+        },
+        dispositions,
+    });
+});
+
+// GET /api/agents/token — get SignalWire browser token for current agent
+router.get('/token/signalwire', authenticate, async (req: Request, res: Response): Promise<void> => {
+    const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { id: true, username: true, email: true, extension: true },
+    });
+
+    if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+    }
+
+    const result = await signalwireService.generateBrowserToken(user.id, user.username, user.email, user.extension || user.id);
+    if (!result.token) {
+        if (result.error === 'subscriber_provisioning_disabled') {
+            res.status(403).json({ error: 'SignalWire subscriber provisioning is disabled for new endpoints. Existing approved subscribers can still connect.' });
+            return;
+        }
+        if (result.error === 'insufficient_balance') {
+            res.status(402).json({ error: 'SignalWire account has insufficient balance for softphone token generation' });
+            return;
+        }
+        res.status(500).json({ error: 'Failed to generate browser token', reason: result.error || 'unknown' });
+        return;
+    }
+    res.json({ token: result.token, spaceUrl: process.env.SIGNALWIRE_SPACE_URL || '' });
+});
+
+router.get('/token/signalwire-relay', authenticate, async (req: Request, res: Response): Promise<void> => {
+    const user = await prisma.user.findUnique({
+        where: { id: req.user!.id },
+        select: { id: true, username: true, extension: true },
+    });
+
+    if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+    }
+
+    const resource = user.extension || user.username || user.id;
+    const result = await signalwireService.generateRelayJwt(resource);
+    if (!result.token) {
+        res.status(500).json({ error: 'Failed to generate Relay JWT', reason: result.error || 'unknown' });
+        return;
+    }
+
+    res.json({
+        token: result.token,
+        projectId: process.env.SIGNALWIRE_PROJECT_ID || '',
+        spaceUrl: process.env.SIGNALWIRE_SPACE_URL || '',
+        resource,
+        transport: 'relay-v2',
+    });
+});
+
+export default router;

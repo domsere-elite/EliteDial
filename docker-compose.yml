@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - JWT_SECRET=${JWT_SECRET:-elitedial-secret-change-me}
+      - JWT_EXPIRES_IN=8h
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - DIRECT_URL=${DIRECT_URL}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - SIGNALWIRE_PROJECT_ID=${SIGNALWIRE_PROJECT_ID:-}
+      - SIGNALWIRE_API_TOKEN=${SIGNALWIRE_API_TOKEN:-}
+      - SIGNALWIRE_SPACE_URL=${SIGNALWIRE_SPACE_URL:-}
+      - CRM_WEBHOOK_URL=${CRM_WEBHOOK_URL:-}
+      - CRM_WEBHOOK_SECRET=${CRM_WEBHOOK_SECRET:-}
+      - AI_TRANSFER_ENABLED=${AI_TRANSFER_ENABLED:-false}
+      - AI_TRANSFER_TARGET=${AI_TRANSFER_TARGET:-}
+      - AMD_ENABLED=${AMD_ENABLED:-true}
+      - AMD_MODE=${AMD_MODE:-DetectMessageEnd}
+      - AMD_ASYNC=${AMD_ASYNC:-true}
+      - AMD_TIMEOUT_MS=${AMD_TIMEOUT_MS:-3500}
+      - AMD_SPEECH_THRESHOLD_MS=${AMD_SPEECH_THRESHOLD_MS:-1200}
+      - AMD_SPEECH_END_THRESHOLD_MS=${AMD_SPEECH_END_THRESHOLD_MS:-700}
+      - AMD_SILENCE_TIMEOUT_MS=${AMD_SILENCE_TIMEOUT_MS:-5000}
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:5000
+      - NEXT_PUBLIC_APP_NAME=EliteDial
+    depends_on:
+      - backend
+    restart: unless-stopped

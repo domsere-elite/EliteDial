@@ -1,0 +1,348 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         String   @default("agent") // agent | supervisor | admin
+  status       String   @default("offline") // available | break | offline | on-call
+  extension    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  calls        Call[]
+  callSessions CallSession[]
+  voicemails   Voicemail[]
+  campaigns    Campaign[]
+}
+
+model Call {
+  id             String   @id @default(uuid())
+  provider       String   @default("signalwire") // signalwire | retell | telnyx | mock
+  channel        String   @default("human") // human | ai
+  mode           String   @default("manual") // manual | preview | progressive | predictive | ai_outbound | inbound
+  direction      String   // inbound | outbound
+  fromNumber     String
+  toNumber       String
+  status         String   @default("initiated") // initiated | ringing | in-progress | completed | failed | no-answer | busy | voicemail
+  duration       Int      @default(0) // seconds
+  recordingUrl   String?
+  dispositionId  String?
+  dispositionNote String?
+  accountId      String?  // CRM account reference
+  accountName    String?
+  agentId        String?
+  agent          User?    @relation(fields: [agentId], references: [id])
+  providerCallId String?
+  signalwireCallSid String?
+  providerMetadata Json?
+  fdcpaNotice    Boolean  @default(false) // was FDCPA notice played
+  dncChecked     Boolean  @default(false) // was DNC checked before dial
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  campaignAttempts CampaignAttempt[]
+  callSession      CallSession?
+  events           CallEvent[]
+  recordings       CallRecording[]
+  transcripts      CallTranscript[]
+
+  @@index([agentId])
+  @@index([accountId])
+  @@index([createdAt])
+  @@index([status])
+  @@index([provider, providerCallId])
+}
+
+model CallSession {
+  id                  String           @id @default(uuid())
+  callId              String?          @unique
+  call                Call?            @relation(fields: [callId], references: [id])
+  provider            String           @default("signalwire")
+  providerCallId      String?
+  providerParentCallId String?
+  channel             String           @default("human") // human | ai
+  mode                String           @default("manual") // manual | preview | progressive | predictive | ai_outbound | inbound
+  direction           String           // inbound | outbound
+  fromNumber          String
+  toNumber            String
+  status              String           @default("initiated")
+  accountId           String?
+  accountName         String?
+  leadExternalId      String?
+  agentId             String?
+  agent               User?            @relation(fields: [agentId], references: [id])
+  campaignId          String?
+  campaign            Campaign?        @relation(fields: [campaignId], references: [id])
+  contactId           String?
+  contact             CampaignContact? @relation(fields: [contactId], references: [id])
+  crmContext          Json?
+  providerMetadata    Json?
+  startedAt           DateTime         @default(now())
+  answeredAt          DateTime?
+  completedAt         DateTime?
+  lastEventAt         DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  events              CallEvent[]
+  recordings          CallRecording[]
+  transcripts         CallTranscript[]
+
+  @@unique([provider, providerCallId])
+  @@index([agentId])
+  @@index([accountId])
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CallEvent {
+  id             String       @id @default(uuid())
+  sessionId      String?
+  session        CallSession? @relation(fields: [sessionId], references: [id])
+  callId         String?
+  call           Call?        @relation(fields: [callId], references: [id])
+  provider       String?
+  providerCallId String?
+  type           String
+  source         String
+  status         String?
+  idempotencyKey String?      @unique
+  payload        Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([sessionId, createdAt])
+  @@index([callId, createdAt])
+  @@index([provider, providerCallId])
+  @@index([type, createdAt])
+}
+
+model CallRecording {
+  id                String       @id @default(uuid())
+  sessionId         String?
+  session           CallSession? @relation(fields: [sessionId], references: [id])
+  callId            String?
+  call              Call?        @relation(fields: [callId], references: [id])
+  provider          String
+  providerRecordingId String?
+  url               String
+  archiveUrl        String?
+  status            String       @default("available")
+  duration          Int?
+  metadata          Json?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([sessionId, createdAt])
+  @@index([callId, createdAt])
+  @@index([provider, providerRecordingId])
+}
+
+model CallTranscript {
+  id                  String       @id @default(uuid())
+  sessionId           String?
+  session             CallSession? @relation(fields: [sessionId], references: [id])
+  callId              String?
+  call                Call?        @relation(fields: [callId], references: [id])
+  provider            String
+  providerTranscriptId String?
+  sourceType          String       @default("recording") // recording | voicemail | ai
+  status              String       @default("available")
+  text                String
+  summary             String?
+  metadata            Json?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  @@index([sessionId, createdAt])
+  @@index([callId, createdAt])
+  @@index([provider, providerTranscriptId])
+}
+
+model Voicemail {
+  id             String   @id @default(uuid())
+  fromNumber     String
+  toNumber       String
+  audioUrl       String?
+  transcription  String?
+  duration       Int      @default(0)
+  isRead         Boolean  @default(false)
+  assignedToId   String?
+  assignedTo     User?    @relation(fields: [assignedToId], references: [id])
+  createdAt      DateTime @default(now())
+
+  @@index([assignedToId])
+  @@index([isRead])
+}
+
+model DNCEntry {
+  id          String   @id @default(uuid())
+  phoneNumber String   @unique
+  reason      String?
+  addedBy     String?
+  createdAt   DateTime @default(now())
+
+  @@index([phoneNumber])
+}
+
+model PhoneNumber {
+  id           String   @id @default(uuid())
+  number       String   @unique
+  label        String?
+  type         String   @default("local") // local | toll-free
+  assignedTo   String?  // queue name or agent
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+}
+
+model QueueConfig {
+  id              String  @id @default(uuid())
+  name            String  @unique
+  holdTimeout     Int     @default(60) // seconds before overflow
+  overflowAction  String  @default("voicemail") // voicemail | virtual-agent | continue-hold
+  holdMusicUrl    String?
+  maxQueueSize    Int     @default(10)
+  isActive        Boolean @default(true)
+}
+
+model WebhookConfig {
+  id        String   @id @default(uuid())
+  url       String
+  secret    String
+  events    String   // comma-separated: call.answered,call.completed,disposition.submitted,voicemail.received
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model APIKey {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  lastUsed  DateTime?
+}
+
+model DispositionCode {
+  id        String  @id @default(uuid())
+  code      String  @unique
+  label     String
+  category  String  @default("general") // payment | promise | skip | general
+  isActive  Boolean @default(true)
+}
+
+model Campaign {
+  id                 String            @id @default(uuid())
+  name               String
+  description        String?
+  status             String            @default("draft") // draft | active | paused | completed | archived
+  dialMode           String            @default("predictive") // predictive | progressive | preview
+  timezone           String            @default("America/Chicago")
+  maxAttemptsPerLead Int               @default(6)
+  abandonRateLimit   Float             @default(0.03)
+  dialRatio          Float             @default(3.0)
+  retryDelaySeconds  Int               @default(600)
+  maxConcurrentCalls Int               @default(0) // 0 means auto-calculate from agents * dialRatio
+  aiTargetEnabled    Boolean           @default(false)
+  aiTarget           String?           // Transfer number or SIP URI for AI agent
+  createdById        String?
+  createdBy          User?             @relation(fields: [createdById], references: [id])
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  lists              CampaignList[]
+  contacts           CampaignContact[]
+  attempts           CampaignAttempt[]
+  callSessions       CallSession[]
+
+  @@index([status])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model CampaignList {
+  id                 String            @id @default(uuid())
+  campaignId         String
+  campaign           Campaign          @relation(fields: [campaignId], references: [id])
+  name               String
+  sourceType         String            @default("upload") // upload | api | crm
+  uploadStatus       String            @default("pending") // pending | imported | failed
+  totalRecords       Int               @default(0)
+  validRecords       Int               @default(0)
+  duplicateSuppressed Int              @default(0)
+  dncSuppressed      Int               @default(0)
+  invalidRecords     Int               @default(0)
+  createdAt          DateTime          @default(now())
+
+  contacts           CampaignContact[]
+
+  @@index([campaignId])
+  @@index([createdAt])
+}
+
+model CampaignContact {
+  id                 String            @id @default(uuid())
+  campaignId         String
+  campaign           Campaign          @relation(fields: [campaignId], references: [id])
+  listId             String?
+  list               CampaignList?     @relation(fields: [listId], references: [id])
+  externalId         String?
+  accountId          String?
+  firstName          String?
+  lastName           String?
+  primaryPhone       String
+  email              String?
+  timezone           String?
+  status             String            @default("queued") // queued | dialing | connected | completed | suppressed-dnc | failed
+  priority           Int               @default(5)
+  attemptCount       Int               @default(0)
+  reservedByUserId   String?
+  reservationType    String?
+  reservationToken   String?
+  reservationExpiresAt DateTime?
+  lastAttemptAt      DateTime?
+  nextAttemptAt      DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  attempts           CampaignAttempt[]
+  callSessions       CallSession[]
+
+  @@unique([campaignId, primaryPhone])
+  @@index([campaignId, status])
+  @@index([campaignId, reservationExpiresAt])
+  @@index([listId])
+}
+
+model CampaignAttempt {
+  id                 String            @id @default(uuid())
+  campaignId         String
+  campaign           Campaign          @relation(fields: [campaignId], references: [id])
+  contactId          String
+  contact            CampaignContact   @relation(fields: [contactId], references: [id])
+  callId             String?
+  call               Call?             @relation(fields: [callId], references: [id])
+  outcome            String?           // human | voicemail | no-answer | busy | failed
+  status             String            @default("initiated")
+  startedAt          DateTime          @default(now())
+  completedAt        DateTime?
+
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([callId])
+  @@index([startedAt])
+}
