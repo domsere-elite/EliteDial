@@ -139,7 +139,14 @@ router.post('/initiate', authenticate, async (req: Request, res: Response): Prom
         return;
     }
 
-    const selectedFromNumber = await phoneNumberService.resolveOutboundNumber(fromNumber);
+    const selectedFromNumber = linkedContact
+        ? (await phoneNumberService.resolveOutboundDID({
+            toNumber,
+            campaignId: linkedContact.campaignId,
+            contactId: linkedContact.id,
+            preferredFromNumber: fromNumber,
+        })).number
+        : await phoneNumberService.resolveOutboundNumber(fromNumber);
     const linkedContact = requestedCampaignContactId
         ? await prisma.campaignContact.findUnique({ where: { id: requestedCampaignContactId } })
         : null;
@@ -373,7 +380,14 @@ router.post('/browser-session', authenticate, async (req: Request, res: Response
         return;
     }
 
-    const selectedFromNumber = await phoneNumberService.resolveOutboundNumber(fromNumber);
+    const selectedFromNumber = linkedContact
+        ? (await phoneNumberService.resolveOutboundDID({
+            toNumber,
+            campaignId: linkedContact.campaignId,
+            contactId: linkedContact.id,
+            preferredFromNumber: fromNumber,
+        })).number
+        : await phoneNumberService.resolveOutboundNumber(fromNumber);
     const linkedContact = requestedCampaignContactId
         ? await prisma.campaignContact.findUnique({ where: { id: requestedCampaignContactId } })
         : null;

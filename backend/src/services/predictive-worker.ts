@@ -293,7 +293,11 @@ export class PredictiveWorker {
         const nextStatus = status === 'completed'
             ? 'completed'
             : (contact.attemptCount + 1 >= campaign.maxAttemptsPerLead ? 'failed' : 'queued');
-        const fromNumber = await phoneNumberService.resolveOutboundNumber();
+        const { number: fromNumber, didResult } = await phoneNumberService.resolveOutboundDID({
+            toNumber: contact.primaryPhone,
+            campaignId: campaign.id,
+            contactId: contact.id,
+        });
         const claimedContact = await campaignReservationService.confirmDialReservation(contact.id, {
             type: 'worker',
             token: contact.reservationToken,
@@ -316,7 +320,7 @@ export class PredictiveWorker {
             fdcpaNotice: true,
             duration: status === 'completed' ? duration : 0,
             completedAt: ['completed', 'no-answer', 'failed'].includes(status) ? new Date() : null,
-            providerMetadata: { workerMode: DIALER_MODE },
+            providerMetadata: { workerMode: DIALER_MODE, didMatchTier: didResult?.matchTier || 'fallback', didAreaCode: didResult?.areaCode || null },
         });
 
         await prisma.campaignAttempt.create({
@@ -361,7 +365,11 @@ export class PredictiveWorker {
 
     private async liveDial(campaign: CampaignWithCount, contact: ReservedWorkerContact) {
         const retryDelayMs = Math.max(30, campaign.retryDelaySeconds) * 1000;
-        const fromNumber = await phoneNumberService.resolveOutboundNumber();
+        const { number: fromNumber, didResult } = await phoneNumberService.resolveOutboundDID({
+            toNumber: contact.primaryPhone,
+            campaignId: campaign.id,
+            contactId: contact.id,
+        });
         let reservedAgentId: string | null = null;
 
         try {

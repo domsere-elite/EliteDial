@@ -200,13 +200,31 @@ model DNCEntry {
 }
 
 model PhoneNumber {
-  id           String   @id @default(uuid())
-  number       String   @unique
-  label        String?
-  type         String   @default("local") // local | toll-free
-  assignedTo   String?  // queue name or agent
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  id              String   @id @default(uuid())
+  number          String   @unique
+  label           String?
+  type            String   @default("local")    // local | toll-free | mobile
+  areaCode        String?                       // NPA (e.g., "205")
+  state           String?                       // 2-letter state code
+  region          String?                       // geographic region key
+  rateCenterLata  String?                       // LATA for rate-center matching
+  assignedTo      String?                       // queue name or agent
+  isActive        Boolean  @default(true)
+  healthScore     Int      @default(100)        // 0-100, decays on spam reports
+  cooldownUntil   DateTime?                     // temporarily benched if overused
+  lastUsedAt      DateTime?
+  totalCallsToday Int      @default(0)
+  totalCallsWeek  Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  didGroupMembers DIDGroupMember[]
+
+  @@index([areaCode])
+  @@index([state])
+  @@index([region])
+  @@index([isActive, healthScore])
+  @@index([cooldownUntil])
 }
 
 model QueueConfig {
@@ -257,8 +275,13 @@ model Campaign {
   dialRatio          Float             @default(3.0)
   retryDelaySeconds  Int               @default(600)
   maxConcurrentCalls Int               @default(0) // 0 means auto-calculate from agents * dialRatio
-  aiTargetEnabled    Boolean           @default(false)
-  aiTarget           String?           // Transfer number or SIP URI for AI agent
+  aiTargetEnabled        Boolean           @default(false)
+  aiTarget               String?           // Transfer number or SIP URI for AI agent
+  proximityMatchEnabled  Boolean           @default(true)
+  autoRotateEnabled      Boolean           @default(true)
+  maxCallsPerDIDPerDay   Int               @default(50)
+  avoidRepeatDID         Boolean           @default(true)
+  defaultDIDId           String?           // fallback DID if no proximity match
   createdById        String?
   createdBy          User?             @relation(fields: [createdById], references: [id])
   createdAt          DateTime          @default(now())
@@ -268,6 +291,7 @@ model Campaign {
   contacts           CampaignContact[]
   attempts           CampaignAttempt[]
   callSessions       CallSession[]
+  didGroups          CampaignDIDGroup[]
 
   @@index([status])
   @@index([createdById])
@@ -345,4 +369,52 @@ model CampaignAttempt {
   @@index([contactId])
   @@index([callId])
   @@index([startedAt])
+}
+
+model DIDGroup {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  members     DIDGroupMember[]
+  campaigns   CampaignDIDGroup[]
+}
+
+model DIDGroupMember {
+  id      String      @id @default(uuid())
+  groupId String
+  group   DIDGroup    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  phoneId String
+  phone   PhoneNumber @relation(fields: [phoneId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, phoneId])
+  @@index([groupId])
+  @@index([phoneId])
+}
+
+model CampaignDIDGroup {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  groupId    String
+  group      DIDGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, groupId])
+  @@index([campaignId])
+}
+
+model AreaCodeMap {
+  areaCode  String   @id
+  state     String
+  region    String
+  city      String?
+  latitude  Float?
+  longitude Float?
+  overlays  String?
+  updatedAt DateTime @default(now())
+
+  @@index([state])
+  @@index([region])
 }
