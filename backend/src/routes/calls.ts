@@ -143,6 +143,10 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
         return;
     }
 
+    const linkedContact = requestedCampaignContactId
+        ? await prisma.campaignContact.findUnique({ where: { id: requestedCampaignContactId } })
+        : null;
+
     const selectedFromNumber = linkedContact
         ? (await phoneNumberService.resolveOutboundDID({
             toNumber,
@@ -151,9 +155,6 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
             preferredFromNumber: fromNumber,
         })).number
         : await phoneNumberService.resolveOutboundNumber(fromNumber);
-    const linkedContact = requestedCampaignContactId
-        ? await prisma.campaignContact.findUnique({ where: { id: requestedCampaignContactId } })
-        : null;
 
     const callMode = isAiMode
         ? 'ai_outbound'
@@ -384,6 +385,10 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
         return;
     }
 
+    const linkedContact = requestedCampaignContactId
+        ? await prisma.campaignContact.findUnique({ where: { id: requestedCampaignContactId } })
+        : null;
+
     const selectedFromNumber = linkedContact
         ? (await phoneNumberService.resolveOutboundDID({
             toNumber,
@@ -392,9 +397,6 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
             preferredFromNumber: fromNumber,
         })).number
         : await phoneNumberService.resolveOutboundNumber(fromNumber);
-    const linkedContact = requestedCampaignContactId
-        ? await prisma.campaignContact.findUnique({ where: { id: requestedCampaignContactId } })
-        : null;
 
     if (linkedContact) {
         const claimedContact = await campaignReservationService.confirmDialReservation(linkedContact.id, {
