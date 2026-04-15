@@ -22,6 +22,7 @@ import retellWebhookRoutes from './routes/retell-webhooks';
 import integrationRoutes from './routes/integration';
 import campaignRoutes from './routes/campaigns';
 import aiAgentRoutes from './routes/ai-agents';
+import settingsRoutes from './routes/settings';
 import { predictiveWorker } from './services/predictive-worker';
 import { reservationCleanup } from './services/reservation-cleanup';
 import { crmRetryQueue } from './services/crm-retry-queue';
@@ -88,6 +89,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/ai-agents', aiAgentRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.use('/sw', webhookRoutes);
 app.use('/retell', retellWebhookRoutes);
