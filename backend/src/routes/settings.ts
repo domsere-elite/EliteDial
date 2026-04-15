@@ -36,4 +36,10 @@ router.put('/ai-overflow-number', authenticate, requireMinRole('admin'), async (
     });
 });
 
+// Supervisor-readable version (for campaign form placeholder). Returns only the value.
+router.get('/ai-overflow-number/public', authenticate, requireMinRole('supervisor'), async (_req: Request, res: Response) => {
+    const row = await prisma.systemSetting.findUnique({ where: { key: 'ai_overflow_number' } });
+    res.json({ value: row?.value ?? null });
+});
+
 export default router;

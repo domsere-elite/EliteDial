@@ -200,6 +200,7 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
         maxConcurrentCalls,
         aiTargetEnabled,
         aiTarget,
+        aiOverflowNumber,
     } = req.body;
 
     const campaign = await prisma.campaign.create({
@@ -215,6 +216,7 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
             maxConcurrentCalls: Math.max(0, Math.round(toNumber(maxConcurrentCalls, 0))),
             aiTargetEnabled: aiTargetEnabled || false,
             aiTarget,
+            aiOverflowNumber: aiOverflowNumber || null,
             createdById: req.user?.id,
         },
     });
@@ -386,6 +388,7 @@ router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(update
             maxConcurrentCalls: req.body.maxConcurrentCalls === undefined ? undefined : Math.max(0, Math.round(toNumber(req.body.maxConcurrentCalls, 0))),
             aiTargetEnabled: req.body.aiTargetEnabled,
             aiTarget: req.body.aiTarget,
+            aiOverflowNumber: req.body.aiOverflowNumber === undefined ? undefined : (req.body.aiOverflowNumber || null),
         },
     });
 
@@ -440,6 +443,29 @@ router.get('/:id/contacts', authenticate, requireMinRole('supervisor'), async (r
         limit: limitNum,
         totalPages: Math.ceil(total / limitNum),
     });
+});
+
+router.get('/:id/attempts', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
+    const campaignId = paramValue(req.params.id);
+    const { limit: limitParam = '50', offset: offsetParam = '0' } = req.query;
+    const limit = Math.min(Math.max(parseInt(limitParam as string, 10), 1), 200);
+    const offset = Math.max(parseInt(offsetParam as string, 10), 0);
+
+    const [attempts, total] = await Promise.all([
+        prisma.campaignAttempt.findMany({
+            where: { campaignId },
+            include: {
+                contact: { select: { firstName: true, lastName: true, primaryPhone: true } },
+                call: { select: { id: true, duration: true, status: true } },
+            },
+            orderBy: { startedAt: 'desc' },
+            take: limit,
+            skip: offset,
+        }),
+        prisma.campaignAttempt.count({ where: { campaignId } }),
+    ]);
+
+    res.json({ attempts, total, limit, offset });
 });
 
 router.post('/:id/lists', authenticate, requireMinRole('supervisor'), validate(createCampaignListSchema), async (req: Request, res: Response): Promise<void> => {
