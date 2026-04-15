@@ -54,7 +54,7 @@ export const computeDialerGuardrails = (input: GuardrailInputs): DialerGuardrail
         : 0;
 
     if (input.recentCompletedAttempts >= 5 && recentAbandonRate >= input.abandonRateLimit) {
-        blockedReasons.push('abandon_rate_limit');
+        warnings.push('abandon_rate_exceeded');
     }
 
     if (effectiveConcurrentLimit > 0 && input.activeCalls >= effectiveConcurrentLimit) {

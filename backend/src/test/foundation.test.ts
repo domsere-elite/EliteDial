@@ -48,7 +48,7 @@ test('dialer guardrails cap predictive live dispatch to available agents', () =>
     assert.deepEqual(controls.warnings, ['safe_predictive_cap']);
 });
 
-test('dialer guardrails block dispatch when abandon rate exceeds limit', () => {
+test('dialer guardrails warn but do not block when abandon rate exceeds limit', () => {
     const controls = computeDialerGuardrails({
         dialMode: 'predictive',
         dialRatio: 1,
@@ -61,6 +61,8 @@ test('dialer guardrails block dispatch when abandon rate exceeds limit', () => {
         predictiveOverdialEnabled: false,
     });
 
-    assert.equal(controls.dispatchCapacity, 0);
-    assert.ok(controls.blockedReasons.includes('abandon_rate_limit'));
+    // Dispatch continues — abandon rate is informational only under the new model
+    assert.ok(controls.dispatchCapacity > 0);
+    assert.ok(controls.warnings.includes('abandon_rate_exceeded'));
+    assert.ok(!controls.blockedReasons.includes('abandon_rate_limit'));
 });
