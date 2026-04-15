@@ -165,6 +165,13 @@ async function seed() {
         });
     }
 
+    // ─── System Settings ──────────────────────────
+    await prisma.systemSetting.upsert({
+        where: { key: 'ai_overflow_number' },
+        update: {},
+        create: { key: 'ai_overflow_number', value: '+12762128412' },
+    });
+
     console.log('✅ Seed complete!');
     console.log(`   Admin: admin / admin123`);
     console.log(`   Supervisor: jthompson / agent123`);

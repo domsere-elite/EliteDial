@@ -286,6 +286,7 @@ model Campaign {
   maxCallsPerDIDPerDay   Int               @default(50)
   avoidRepeatDID         Boolean           @default(true)
   defaultDIDId           String?           // fallback DID if no proximity match
+  aiOverflowNumber       String?           // E.164 AI overflow number, null = use global SystemSetting
   createdById        String?
   createdBy          User?             @relation(fields: [createdById], references: [id])
   createdAt          DateTime          @default(now())
@@ -425,4 +426,11 @@ model AreaCodeMap {
 
   @@index([state])
   @@index([region])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
 }
