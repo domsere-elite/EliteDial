@@ -1375,6 +1375,21 @@ label {
   color: #b73e4f;
 }
 
+.notice-warning {
+  background: rgba(214, 140, 24, 0.1);
+  border-color: rgba(214, 140, 24, 0.22);
+  color: #7a5210;
+}
+
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(223, 79, 97, 0.4); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+
+.pulse-red {
+  animation: pulse-red 1.6s ease-in-out infinite;
+}
+
 .status-row {
   display: flex;
   align-items: center;
