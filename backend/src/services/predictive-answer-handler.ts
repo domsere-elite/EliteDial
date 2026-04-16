@@ -14,6 +14,7 @@ export interface AiOverflowBridgeAnsweredContext {
     bridgeWith: string;
     campaignId: string;
     contactId: string;
+    attemptId: string;
 }
 
 export interface PredictiveAnswerHandlerDeps {
@@ -44,6 +45,11 @@ export interface PredictiveAnswerHandlerDeps {
             details?: Record<string, string | number | boolean | null | undefined>;
         }) => Promise<any>;
     };
+    // Releases the contact-side reservation so the contact isn't pinned at
+    // status='dialing' forever when an answer-handler terminal branch runs.
+    // 'completed' clears reservation + sets contact status=completed.
+    // 'retry' clears reservation + requeues (or fails if maxAttempts hit).
+    resolveReservation: (attemptId: string, outcome: 'completed' | 'retry') => Promise<void>;
     config: {
         connectionId: string;
         sipDomain: string;
@@ -57,7 +63,19 @@ export interface PredictiveAnswerHandler {
 }
 
 export function buildPredictiveAnswerHandler(deps: PredictiveAnswerHandlerDeps): PredictiveAnswerHandler {
-    const { client, prisma, systemSettings, callAudit, config } = deps;
+    const { client, prisma, systemSettings, callAudit, resolveReservation, config } = deps;
+
+    async function safeResolveReservation(attemptId: string, outcome: 'completed' | 'retry') {
+        try {
+            await resolveReservation(attemptId, outcome);
+        } catch (err) {
+            logger.warn('predictive-answer-handler: failed to resolve reservation', {
+                attemptId,
+                outcome,
+                error: (err as Error).message,
+            });
+        }
+    }
 
     async function markAttempt(attemptId: string, data: Record<string, any>) {
         try {
@@ -106,6 +124,7 @@ export function buildPredictiveAnswerHandler(deps: PredictiveAnswerHandlerDeps):
                     idempotencyKey: `predictive:${ctx.attemptId}:voicemail`,
                     details: { campaignId: ctx.campaignId, contactId: ctx.contactId },
                 });
+                await safeResolveReservation(ctx.attemptId, 'completed');
                 return;
             }
 
@@ -145,6 +164,7 @@ export function buildPredictiveAnswerHandler(deps: PredictiveAnswerHandlerDeps):
                         idempotencyKey: `predictive:${ctx.attemptId}:bridge-failed`,
                         details: { campaignId: ctx.campaignId, contactId: ctx.contactId, reason: (err as Error).message },
                     });
+                    await safeResolveReservation(ctx.attemptId, 'retry');
                     return;
                 }
             }
@@ -163,6 +183,7 @@ export function buildPredictiveAnswerHandler(deps: PredictiveAnswerHandlerDeps):
                     idempotencyKey: `predictive:${ctx.attemptId}:no-overflow`,
                     details: { campaignId: ctx.campaignId, contactId: ctx.contactId, reason: 'no_overflow_configured' },
                 });
+                await safeResolveReservation(ctx.attemptId, 'retry');
                 return;
             }
 
@@ -197,6 +218,7 @@ export function buildPredictiveAnswerHandler(deps: PredictiveAnswerHandlerDeps):
                     idempotencyKey: `predictive:${ctx.attemptId}:ai-bridge-failed`,
                     details: { campaignId: ctx.campaignId, contactId: ctx.contactId, reason: (err as Error).message },
                 });
+                await safeResolveReservation(ctx.attemptId, 'retry');
             }
         },
 
@@ -220,6 +242,7 @@ export function buildPredictiveAnswerHandler(deps: PredictiveAnswerHandlerDeps):
                 });
                 await client.hangup({ callControlId: ctx.bridgeWith }).catch(() => { /* best-effort */ });
                 await client.hangup({ callControlId: ctx.callControlId }).catch(() => { /* best-effort */ });
+                await safeResolveReservation(ctx.attemptId, 'retry');
             }
         },
     };
