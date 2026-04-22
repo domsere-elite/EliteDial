@@ -1,5 +1,10 @@
-import { TelnyxClient } from './telnyx-client';
 import { logger } from '../utils/logger';
+
+export interface PredictiveAnswerClient {
+    createCall: (args: Record<string, any>) => Promise<any>;
+    hangup: (args: { callControlId: string }) => Promise<any>;
+    bridge: (args: { callControlId: string; bridgeWith: string }) => Promise<any>;
+}
 
 export interface PredictiveAnsweredContext {
     callControlId: string;
@@ -18,7 +23,7 @@ export interface AiOverflowBridgeAnsweredContext {
 }
 
 export interface PredictiveAnswerHandlerDeps {
-    client: Pick<TelnyxClient, 'createCall' | 'hangup' | 'bridge'>;
+    client: PredictiveAnswerClient;
     prisma: {
         user: {
             findFirst: (args: any) => Promise<{ id: string; telnyxSipUsername: string | null } | null>;

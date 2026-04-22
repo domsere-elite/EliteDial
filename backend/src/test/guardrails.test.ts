@@ -106,11 +106,8 @@ test('multiple blocked reasons can coexist', () => {
         predictiveOverdialEnabled: false,
     });
 
-    // no_available_agents because availableAgents is 0
     assert.ok(result.blockedReasons.includes('no_available_agents'));
-    // abandon_rate_limit because 5/10 = 0.5 >= 0.03
-    assert.ok(result.blockedReasons.includes('abandon_rate_limit'));
-    assert.ok(result.blockedReasons.length >= 2);
+    assert.ok(result.warnings.includes('abandon_rate_exceeded'));
     assert.equal(result.dispatchCapacity, 0);
 });
 

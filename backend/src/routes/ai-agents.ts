@@ -47,7 +47,7 @@ router.get('/', authenticate, requireMinRole('supervisor'), async (req: Request,
 
 // GET /api/ai-agents/:id — single agent detail + recent calls + transcripts
 router.get('/:id', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const agentId = req.params.id;
+    const agentId = String(req.params.id);
     const agent = await retellService.getAgent(agentId);
 
     if (!agent) {
@@ -80,7 +80,7 @@ router.get('/:id', authenticate, requireMinRole('supervisor'), async (req: Reque
 
 // POST /api/ai-agents/:id/launch — launch AI outbound call with this agent
 router.post('/:id/launch', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const agentId = req.params.id;
+    const agentId = String(req.params.id);
     const { toNumber, fromNumber, campaignId, accountId, metadata } = req.body;
 
     if (!toNumber) {

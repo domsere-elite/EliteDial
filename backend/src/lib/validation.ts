@@ -230,10 +230,8 @@ export function isTokenBlacklisted(token: string): boolean {
     return blacklistedTokens.has(token);
 }
 
-// Periodic cleanup to prevent unbounded growth
-// Tokens naturally expire via JWT expiry, so we just need to bound memory
 setInterval(() => {
     if (blacklistedTokens.size > 10000) {
         blacklistedTokens.clear();
     }
-}, TOKEN_CLEANUP_INTERVAL_MS);
+}, TOKEN_CLEANUP_INTERVAL_MS).unref();
