@@ -34,7 +34,15 @@ export interface PredictiveAnswerHandlerDeps {
         get: (key: string) => Promise<string | null>;
     };
     callAudit: {
-        track: (event: Record<string, any>) => Promise<void>;
+        track: (event: {
+            type: string;
+            source?: string;
+            status?: string;
+            idempotencyKey?: string;
+            callId?: string;
+            callSid?: string;
+            details?: Record<string, string | number | boolean | null | undefined>;
+        }) => Promise<any>;
     };
     config: {
         connectionId: string;
