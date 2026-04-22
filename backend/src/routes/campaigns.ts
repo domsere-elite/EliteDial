@@ -6,6 +6,7 @@ import { predictiveWorker } from '../services/predictive-worker';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { computeDialerGuardrails, DIALER_STATS_WINDOW_MINUTES } from '../services/dialer-guardrails';
 import { config } from '../config';
+import { validate, createCampaignSchema, updateCampaignSchema, createCampaignListSchema, importContactsSchema } from '../lib/validation';
 
 const router = Router();
 
@@ -186,25 +187,20 @@ router.get('/', authenticate, requireMinRole('supervisor'), async (req: Request,
     res.json(campaigns);
 });
 
-router.post('/', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
+router.post('/', authenticate, requireMinRole('supervisor'), validate(createCampaignSchema), async (req: Request, res: Response): Promise<void> => {
     const {
         name,
         description,
-        dialMode = 'predictive',
-        timezone = 'America/Chicago',
-        maxAttemptsPerLead = 6,
-        abandonRateLimit = 0.03,
-        dialRatio = 3,
-        retryDelaySeconds = 600,
-        maxConcurrentCalls = 0,
+        dialMode,
+        timezone,
+        maxAttemptsPerLead,
+        abandonRateLimit,
+        dialRatio,
+        retryDelaySeconds,
+        maxConcurrentCalls,
         aiTargetEnabled,
         aiTarget,
     } = req.body;
-
-    if (!name) {
-        res.status(400).json({ error: 'name is required' });
-        return;
-    }
 
     const campaign = await prisma.campaign.create({
         data: {
@@ -374,7 +370,7 @@ router.get('/:id', authenticate, requireMinRole('supervisor'), async (req: Reque
     res.json(campaign);
 });
 
-router.patch('/:id', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
+router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(updateCampaignSchema), async (req: Request, res: Response): Promise<void> => {
     const campaignId = paramValue(req.params.id);
     const campaign = await prisma.campaign.update({
         where: { id: campaignId },
@@ -446,13 +442,9 @@ router.get('/:id/contacts', authenticate, requireMinRole('supervisor'), async (r
     });
 });
 
-router.post('/:id/lists', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/lists', authenticate, requireMinRole('supervisor'), validate(createCampaignListSchema), async (req: Request, res: Response): Promise<void> => {
     const campaignId = paramValue(req.params.id);
-    const { name, sourceType = 'upload' } = req.body;
-    if (!name) {
-        res.status(400).json({ error: 'name is required' });
-        return;
-    }
+    const { name, sourceType } = req.body;
 
     const list = await prisma.campaignList.create({
         data: {

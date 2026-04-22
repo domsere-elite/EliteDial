@@ -1,13 +1,48 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import Link from 'next/link';
+import ThemeToggle from '@/components/ThemeToggle';
+import SessionTimeoutWarning from '@/components/SessionTimeoutWarning';
+import { getTokenExpiry } from '@/lib/jwt';
+import api from '@/lib/api';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-    const { user, loading, logout, updateStatus, hasRole } = useAuth();
+    const { user, token, loading, logout, updateStatus, hasRole } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
+    const [tokenExpiry, setTokenExpiry] = useState<number | undefined>();
+    const [vmUnread, setVmUnread] = useState(0);
+
+    useEffect(() => {
+        const saved = localStorage.getItem('elitedial_token');
+        if (saved) {
+            const exp = getTokenExpiry(saved);
+            if (exp) setTokenExpiry(exp);
+        }
+    }, [token]);
+
+    useEffect(() => {
+        api.get('/voicemails?unreadOnly=true&limit=1').then(res => {
+            setVmUnread(res.data.unreadCount || 0);
+        }).catch(() => {});
+    }, []);
+
+    const handleExtendSession = async () => {
+        try {
+            const refreshToken = localStorage.getItem('elitedial_refresh_token');
+            if (refreshToken) {
+                const res = await api.post('/auth/refresh', { refreshToken });
+                localStorage.setItem('elitedial_token', res.data.token);
+                if (res.data.refreshToken) localStorage.setItem('elitedial_refresh_token', res.data.refreshToken);
+                const exp = getTokenExpiry(res.data.token);
+                if (exp) setTokenExpiry(exp);
+            }
+        } catch {
+            logout();
+        }
+    };
 
     useEffect(() => {
         if (!loading && !user) {
@@ -24,15 +59,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
 
     const primaryNav = [
-        { href: '/dashboard', label: 'Calls', icon: 'CA', roles: ['agent', 'supervisor', 'admin'] },
-        { href: '/dashboard/accounts', label: 'Accounts', icon: 'AC', roles: ['agent', 'supervisor', 'admin'] },
-        { href: '/dashboard/campaigns', label: 'Campaigns', icon: 'CP', roles: ['supervisor', 'admin'] },
-        { href: '/dashboard/reports', label: 'History', icon: 'HI', roles: ['supervisor', 'admin'] },
-    ];
-    const secondaryNav = [
-        { href: '/dashboard/voicemail', label: 'Voicemail', icon: 'VM', roles: ['agent', 'supervisor', 'admin'] },
-        { href: '/dashboard/diagnostics', label: 'Diagnostics', icon: 'DG', roles: ['supervisor', 'admin'] },
-        { href: '/dashboard/settings', label: 'Settings', icon: 'ST', roles: ['supervisor', 'admin'] },
+        { href: '/dashboard', label: 'Inbound Hub', icon: 'IH', roles: ['agent', 'supervisor', 'admin'] },
+        { href: '/dashboard/ai-agents', label: 'AI Agents', icon: 'AI', roles: ['supervisor', 'admin'] },
+        { href: '/dashboard/reports', label: 'Reports', icon: 'RP', roles: ['supervisor', 'admin'] },
         { href: '/dashboard/admin', label: 'Admin', icon: 'AD', roles: ['admin'] },
     ];
 
@@ -73,42 +102,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </Link>
         ));
 
-    const topNav = [
-        { href: '/dashboard/reports', label: 'Dashboard', roles: ['supervisor', 'admin'] },
-        { href: '/dashboard', label: 'Dialer', roles: ['agent', 'supervisor', 'admin'] },
-        { href: '/dashboard/accounts', label: 'Accounts', roles: ['agent', 'supervisor', 'admin'] },
-        { href: '/dashboard/campaigns', label: 'Campaigns', roles: ['supervisor', 'admin'] },
-    ].filter((item) => item.roles.some((role) => hasRole(role)));
-
-    const agentLabel = `Agent #${String(user.id).slice(0, 4).toUpperCase()}`;
+    const agentLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
     const displayName = `${user.firstName} ${user.lastName}`;
 
     return (
         <div className="app-shell">
+            <SessionTimeoutWarning
+                tokenExpiresAt={tokenExpiry}
+                onExtend={handleExtendSession}
+                onLogout={() => { logout(); router.push('/'); }}
+            />
             <aside className="sidebar">
                 <div className="sidebar-brand">
-                    <div className="brand-mark">
-                        {user.firstName[0]}
-                        {user.lastName[0]}
-                    </div>
+                    <div className="brand-mark">ED</div>
                     <div>
-                        <h1>Collector Portal</h1>
-                        <span>{agentLabel}</span>
+                        <h1>EliteDial</h1>
+                        <span>Inbound Operations</span>
                     </div>
                 </div>
 
                 <nav className="sidebar-nav">
                     {renderNavGroup(primaryNav)}
                 </nav>
-
-                <button className="sidebar-cta" onClick={() => router.push('/dashboard/campaigns')}>
-                    Start Auto-Dialer
-                </button>
-
-                <div className="sidebar-nav compact">
-                    <div className="sidebar-section-label">Operations</div>
-                    {renderNavGroup(secondaryNav)}
-                </div>
 
                 <div className="sidebar-footer">
                     <div className="presence-card">
@@ -134,13 +149,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                         </div>
                     </div>
 
-                    <button
-                        onClick={() => { logout(); router.push('/'); }}
-                        className="btn btn-secondary"
-                        style={{ width: '100%', fontSize: '0.78rem' }}
-                    >
-                        Sign Out
-                    </button>
+                    <Link href="/dashboard/voicemail" className="btn btn-secondary" style={{ width: '100%', fontSize: '0.78rem', marginBottom: 8, justifyContent: 'space-between' }}>
+                        <span>Voicemail</span>
+                        {vmUnread > 0 && <span className="badge badge-blue" style={{ marginLeft: 8 }}>{vmUnread}</span>}
+                    </Link>
+
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                        <button
+                            onClick={() => { logout(); router.push('/'); }}
+                            className="btn btn-secondary"
+                            style={{ flex: 1, fontSize: '0.78rem' }}
+                        >
+                            Sign Out
+                        </button>
+                        <ThemeToggle />
+                    </div>
                 </div>
             </aside>
 
@@ -148,31 +171,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <header className="topbar">
                     <div className="topbar-brand">
                         <div>
-                            <div className="topline">PrecisionDial</div>
-                            <div className="topbar-title">Operator cockpit</div>
-                        </div>
-                        <div className="topbar-search">
-                            <input className="input" placeholder="Search accounts, debtors..." type="text" />
+                            <div className="topline">EliteDial</div>
+                            <div className="topbar-title">Inbound Hub</div>
                         </div>
                     </div>
-
                     <div className="topbar-actions">
-                        <nav className="topbar-nav">
-                            {topNav.map((item) => (
-                                <Link
-                                    key={item.href}
-                                    href={item.href}
-                                    className={`topbar-link ${isActiveRoute(item.href) ? 'active' : ''}`}
-                                >
-                                    {item.label}
-                                </Link>
-                            ))}
-                        </nav>
-
                         <div className="topbar-presence">
                             <span className={`status-orb ${user.status === 'available' ? 'ready' : user.status === 'on-call' ? 'live' : 'idle'}`} />
                             <div>
-                                <div className="topline">{user.status === 'on-call' ? 'Live Dialing' : 'Agent Presence'}</div>
+                                <div className="topline">{user.status === 'on-call' ? 'On Call' : user.status}</div>
                                 <div className="topbar-user">{displayName}</div>
                             </div>
                         </div>

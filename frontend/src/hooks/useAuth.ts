@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import api from '@/lib/api';
+import api, { logout as apiLogout } from '@/lib/api';
 
 interface User {
     id: string;
@@ -40,19 +40,19 @@ export function useAuth() {
 
     const login = useCallback(async (username: string, password: string) => {
         const res = await api.post('/auth/login', { username, password });
-        const { token: newToken, user: newUser } = res.data;
+        const { token: newToken, refreshToken: newRefreshToken, user: newUser } = res.data;
         localStorage.setItem('elitedial_token', newToken);
+        if (newRefreshToken) localStorage.setItem('elitedial_refresh_token', newRefreshToken);
         localStorage.setItem('elitedial_user', JSON.stringify(newUser));
         setToken(newToken);
         setUser(newUser);
         return newUser;
     }, []);
 
-    const logout = useCallback(() => {
-        localStorage.removeItem('elitedial_token');
-        localStorage.removeItem('elitedial_user');
+    const logout = useCallback(async () => {
         setToken(null);
         setUser(null);
+        await apiLogout();
     }, []);
 
     const updateStatus = useCallback(async (status: string) => {

@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { requireMinRole } from '../middleware/roles';
 import { signalwireService } from '../services/signalwire';
+import { validate, updateAgentStatusSchema } from '../lib/validation';
 
 const router = Router();
 const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
@@ -20,19 +21,13 @@ router.get('/', authenticate, requireMinRole('supervisor'), async (req: Request,
 });
 
 // PATCH /api/agents/:id/status — update availability
-router.patch('/:id/status', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.patch('/:id/status', authenticate, validate(updateAgentStatusSchema), async (req: Request, res: Response): Promise<void> => {
     const id = paramValue(req.params.id);
     const { status } = req.body;
 
     // Agents can only update their own status; supervisors/admins can update anyone
     if (req.user!.role === 'agent' && req.user!.id !== id) {
         res.status(403).json({ error: 'Cannot update another agent\'s status' });
-        return;
-    }
-
-    const validStatuses = ['available', 'break', 'offline', 'on-call'];
-    if (!validStatuses.includes(status)) {
-        res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
         return;
     }
 

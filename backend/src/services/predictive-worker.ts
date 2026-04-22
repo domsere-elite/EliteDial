@@ -51,9 +51,11 @@ type ReservedWorkerContact = CampaignContactRow & {
 export class PredictiveWorker {
     private interval: NodeJS.Timeout | null = null;
     private isRunning = false;
+    private cycleLock = false; // Mutex to prevent overlapping cycles
     private lastRunAt: string | null = null;
     private lastError: string | null = null;
     private lastStats: WorkerStats | null = null;
+    private skippedCycles = 0;
 
     start() {
         if (this.interval) return;
@@ -77,6 +79,8 @@ export class PredictiveWorker {
             mode: DIALER_MODE,
             pollIntervalMs: POLL_INTERVAL_MS,
             cycleInProgress: this.isRunning,
+            cycleLocked: this.cycleLock,
+            skippedCycles: this.skippedCycles,
             lastRunAt: this.lastRunAt,
             lastError: this.lastError,
             lastStats: this.lastStats,
@@ -89,7 +93,16 @@ export class PredictiveWorker {
     }
 
     private async cycle() {
-        if (this.isRunning) return;
+        // Mutex: skip if a previous cycle is still running
+        if (this.cycleLock) {
+            this.skippedCycles += 1;
+            logger.warn('PredictiveWorker cycle skipped — previous cycle still running', {
+                skippedCycles: this.skippedCycles,
+            });
+            return;
+        }
+
+        this.cycleLock = true;
         this.isRunning = true;
         this.lastRunAt = new Date().toISOString();
 
@@ -102,6 +115,7 @@ export class PredictiveWorker {
             logger.error('PredictiveWorker cycle error', { error: err });
         } finally {
             this.isRunning = false;
+            this.cycleLock = false;
         }
     }
 

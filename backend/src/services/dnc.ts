@@ -5,12 +5,18 @@ const prisma = new PrismaClient();
 
 export class DNCService {
     // Check if a phone number is on the DNC list
+    // FAIL-SAFE: If the database query fails, treat as DNC (deny the call)
     async isOnDNC(phoneNumber: string): Promise<boolean> {
         const normalized = this.normalizeNumber(phoneNumber);
-        const entry = await prisma.dNCEntry.findUnique({
-            where: { phoneNumber: normalized },
-        });
-        return !!entry;
+        try {
+            const entry = await prisma.dNCEntry.findUnique({
+                where: { phoneNumber: normalized },
+            });
+            return !!entry;
+        } catch (err) {
+            logger.error('DNC check failed — fail-safe blocking call', { phoneNumber: normalized, error: err });
+            return true;
+        }
     }
 
     // Add a number to the DNC list

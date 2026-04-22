@@ -90,4 +90,17 @@ api.interceptors.response.use(
     }
 );
 
+export async function logout(): Promise<void> {
+    try {
+        await api.post('/auth/logout');
+    } catch {
+        // Best-effort server-side logout; clear local state regardless
+    } finally {
+        localStorage.removeItem('elitedial_token');
+        localStorage.removeItem('elitedial_refresh_token');
+        localStorage.removeItem('elitedial_user');
+        window.location.href = '/';
+    }
+}
+
 export default api;

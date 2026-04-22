@@ -14,7 +14,7 @@ router.get('/summary', authenticate, requireMinRole('supervisor'), async (req: R
     const where = { createdAt: { gte: start, lte: end } };
     const eventWhere = { createdAt: { gte: start, lte: end } };
 
-    const [totalCalls, outbound, inbound, completed, noAnswer, busy, failed, voicemail, avgDuration, dispositions, abandonedEvents, guardrailBlocks] = await Promise.all([
+    const [totalCalls, outbound, inbound, completed, noAnswer, busy, failed, voicemail, avgDuration, dispositions, abandonedEvents, guardrailBlocks, aiCallCount, aiCompletedCount, aiAvgDuration] = await Promise.all([
         prisma.call.count({ where }),
         prisma.call.count({ where: { ...where, direction: 'outbound' } }),
         prisma.call.count({ where: { ...where, direction: 'inbound' } }),
@@ -31,6 +31,9 @@ router.get('/summary', authenticate, requireMinRole('supervisor'), async (req: R
         }),
         prisma.callEvent.count({ where: { ...eventWhere, type: 'call.abandoned' } }),
         prisma.callEvent.count({ where: { ...eventWhere, type: 'dialer.guardrail.blocked' } }),
+        prisma.call.count({ where: { ...where, channel: 'ai' } }),
+        prisma.call.count({ where: { ...where, channel: 'ai', status: 'completed' } }),
+        prisma.call.aggregate({ where: { ...where, channel: 'ai', status: 'completed' }, _avg: { duration: true } }),
     ]);
 
     const answerRate = totalCalls > 0 ? ((completed / totalCalls) * 100).toFixed(1) : '0.0';
@@ -52,6 +55,9 @@ router.get('/summary', authenticate, requireMinRole('supervisor'), async (req: R
         abandonRate,
         avgDuration: Math.round(avgDuration._avg.duration || 0),
         dispositions,
+        aiCalls: aiCallCount,
+        aiCompleted: aiCompletedCount,
+        aiAvgDuration: Math.round(aiAvgDuration._avg?.duration || 0),
     });
 });
 
@@ -65,22 +71,42 @@ router.get('/agents', authenticate, requireMinRole('supervisor'), async (req: Re
         select: { id: true, firstName: true, lastName: true, username: true, status: true },
     });
 
-    const agentStats = await Promise.all(
-        agents.map(async (agent) => {
-            const [total, answered, avg] = await Promise.all([
-                prisma.call.count({ where: { agentId: agent.id, createdAt: { gte: today } } }),
-                prisma.call.count({ where: { agentId: agent.id, status: 'completed', createdAt: { gte: today } } }),
-                prisma.call.aggregate({ where: { agentId: agent.id, status: 'completed', createdAt: { gte: today } }, _avg: { duration: true } }),
-            ]);
-            return {
-                ...agent,
-                totalCalls: total,
-                answeredCalls: answered,
-                answerRate: total > 0 ? ((answered / total) * 100).toFixed(1) : '0.0',
-                avgDuration: Math.round(avg._avg.duration || 0),
-            };
-        })
-    );
+    const agentIds = agents.map(a => a.id);
+
+    const [totalByAgent, answeredByAgent, avgByAgent] = await Promise.all([
+        prisma.call.groupBy({
+            by: ['agentId'],
+            where: { agentId: { in: agentIds }, createdAt: { gte: today } },
+            _count: true,
+        }),
+        prisma.call.groupBy({
+            by: ['agentId'],
+            where: { agentId: { in: agentIds }, status: 'completed', createdAt: { gte: today } },
+            _count: true,
+        }),
+        prisma.call.groupBy({
+            by: ['agentId'],
+            where: { agentId: { in: agentIds }, status: 'completed', createdAt: { gte: today } },
+            _avg: { duration: true },
+        }),
+    ]);
+
+    // Build lookup maps
+    const totalMap = new Map(totalByAgent.map(r => [r.agentId, r._count]));
+    const answeredMap = new Map(answeredByAgent.map(r => [r.agentId, r._count]));
+    const avgMap = new Map(avgByAgent.map(r => [r.agentId, r._avg.duration || 0]));
+
+    const agentStats = agents.map(agent => {
+        const total = totalMap.get(agent.id) || 0;
+        const answered = answeredMap.get(agent.id) || 0;
+        return {
+            ...agent,
+            totalCalls: total,
+            answeredCalls: answered,
+            answerRate: total > 0 ? ((answered / total) * 100).toFixed(1) : '0.0',
+            avgDuration: Math.round(avgMap.get(agent.id) || 0),
+        };
+    });
 
     res.json(agentStats);
 });

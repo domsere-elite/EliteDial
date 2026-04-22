@@ -54,31 +54,6 @@ type ImportResult = {
     dncSuppressed: number;
 };
 
-type DialerCampaignStatus = {
-    id: string;
-    name: string;
-    dialMode: string;
-    status: string;
-    dialRatio: number;
-    retryDelaySeconds: number;
-    maxConcurrentCalls: number;
-    queue: { queued: number; dialing: number; completed: number; failed: number };
-    availableAgents: number;
-    dispatchCapacity: number;
-    queuePressure: number;
-    recentAbandonRate: number;
-};
-
-type DialerStatusResponse = {
-    worker: {
-        running: boolean;
-        mode: string;
-        pollIntervalMs: number;
-        lastStats: { campaignsChecked: number; contactsDialed: number; campaignsBlocked: number } | null;
-    };
-    campaigns: DialerCampaignStatus[];
-};
-
 const modeLabels: Record<string, string> = { predictive: 'Predictive', progressive: 'Progressive', preview: 'Preview' };
 const initials = (name: string) => name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'CM';
 
@@ -87,10 +62,7 @@ export default function CampaignsPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [dialerStatus, setDialerStatus] = useState<DialerStatusResponse | null>(null);
     const [loading, setLoading] = useState(true);
-    const [loadingDialer, setLoadingDialer] = useState(true);
-    const [runningCycle, setRunningCycle] = useState(false);
     const [showModal, setShowModal] = useState(false);
     const [selectedCampaign, setSelectedCampaign] = useState<CampaignDetail | null>(null);
     const [drawerLoading, setDrawerLoading] = useState(false);
@@ -122,21 +94,7 @@ export default function CampaignsPage() {
         }
     }, []);
 
-    const loadDialerStatus = useCallback(async () => {
-        try {
-            setDialerStatus((await api.get('/campaigns/dialer/status')).data);
-        } finally {
-            setLoadingDialer(false);
-        }
-    }, []);
-
     useEffect(() => { void loadCampaigns(); }, [loadCampaigns]);
-    useEffect(() => {
-        if (!hasRole('supervisor')) return;
-        void loadDialerStatus();
-        const interval = setInterval(() => void loadDialerStatus(), 8000);
-        return () => clearInterval(interval);
-    }, [hasRole, loadDialerStatus]);
 
     const openCreateModal = () => {
         setEditingId(null);
@@ -196,24 +154,14 @@ export default function CampaignsPage() {
 
     const startCampaign = async (id: string) => {
         await api.post(`/campaigns/${id}/start`);
-        await Promise.all([loadCampaigns(), loadDialerStatus()]);
+        await loadCampaigns();
         if (selectedCampaign?.id === id) await refreshDrawer(id);
     };
 
     const pauseCampaign = async (id: string) => {
         await api.post(`/campaigns/${id}/pause`);
-        await Promise.all([loadCampaigns(), loadDialerStatus()]);
+        await loadCampaigns();
         if (selectedCampaign?.id === id) await refreshDrawer(id);
-    };
-
-    const runDialerCycle = async () => {
-        setRunningCycle(true);
-        try {
-            await api.post('/campaigns/dialer/run-now', {});
-            await Promise.all([loadCampaigns(), loadDialerStatus()]);
-        } finally {
-            setRunningCycle(false);
-        }
     };
 
     const handleFile = async (file: File) => {
@@ -246,8 +194,6 @@ export default function CampaignsPage() {
 
     const totalContacts = campaigns.reduce((sum, campaign) => sum + campaign._count.contacts, 0);
     const totalAttempts = campaigns.reduce((sum, campaign) => sum + campaign._count.attempts, 0);
-    const totalActiveAgents = dialerStatus?.campaigns.reduce((sum, item) => sum + item.availableAgents, 0) || 0;
-    const activeDialingRate = dialerStatus?.campaigns.reduce((sum, item) => sum + item.dispatchCapacity, 0) || 0;
     const successPercentage = totalContacts > 0 ? Math.min(99.9, (totalAttempts / totalContacts) * 100) : 0;
     const chartBars = [28, 44, 36, 61, 52, 68, 84];
     const chartLabels = ['06:00', '10:00', '14:00', '18:00', '22:00', '02:00', 'NOW'];
@@ -259,19 +205,19 @@ export default function CampaignsPage() {
     return (
         <div className="precision-page">
             <div className="precision-toolbar">
-                <div className="precision-toolbar-title">Campaign Management</div>
-                <div className="precision-search"><input className="input" placeholder="Search campaigns, queues, or account groups..." /></div>
+                <div className="precision-toolbar-title">AI Outbound Campaigns</div>
+                <div className="precision-search"><input className="input" placeholder="Search campaigns..." /></div>
                 <div className="precision-toolbar-actions">
-                    <button className="btn btn-secondary" onClick={() => void loadDialerStatus()} disabled={loadingDialer}>Filter</button>
                     <button className="btn btn-primary" onClick={openCreateModal} style={{ color: '#fff' }}>Create Campaign</button>
                 </div>
             </div>
+            <div className="topline" style={{ marginTop: -8, marginBottom: 8 }}>Manage contact lists for AI outbound calling.</div>
 
             <section className="campaign-kpi-grid">
-                <div className="campaign-stat-card"><div className="label">Active Dialing Rate</div><div className="value">{activeDialingRate}</div></div>
+                <div className="campaign-stat-card"><div className="label">Total Campaigns</div><div className="value">{campaigns.length}</div></div>
                 <div className="campaign-stat-card"><div className="label">Success Percentage</div><div className="value">{successPercentage.toFixed(1)}%</div></div>
                 <div className="campaign-stat-card"><div className="label">Total Leads Remaining</div><div className="value">{totalContacts.toLocaleString()}</div></div>
-                <div className="campaign-stat-card"><div className="label">Active Agents</div><div className="value">{totalActiveAgents}</div></div>
+                <div className="campaign-stat-card"><div className="label">Total Attempts</div><div className="value">{totalAttempts.toLocaleString()}</div></div>
             </section>
 
             <div className="campaign-layout-grid">
@@ -360,9 +306,7 @@ export default function CampaignsPage() {
                             <span className="status-badge status-available">Live</span>
                         </div>
                         <p style={{ color: 'var(--text-secondary)' }}>
-                            {dialerStatus?.campaigns?.[0]
-                                ? `System recommends adjusting ${dialerStatus.campaigns[0].name} based on ${(dialerStatus.campaigns[0].recentAbandonRate * 100).toFixed(1)}% recent abandon pressure.`
-                                : 'System recommends increasing dial rate on the highest-affinity campaign in the current time window.'}
+                            System recommends increasing dial rate on the highest-affinity campaign in the current time window.
                         </p>
                         <button className="btn btn-primary btn-sm" style={{ marginTop: 12, color: '#fff' }}>Apply Strategy</button>
                     </section>
@@ -385,26 +329,6 @@ export default function CampaignsPage() {
                             {campaigns.length === 0 && <div className="topline">No active queue uploads yet.</div>}
                         </div>
                     </section>
-
-                    <section className="precision-card">
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                            <div>
-                                <h3 style={{ fontFamily: 'var(--font-headline)', fontSize: '1.12rem', fontWeight: 800 }}>Predictive Dialer</h3>
-                                <div className="topline">Worker status, pacing, and manual cycle control.</div>
-                            </div>
-                            <button className="btn btn-secondary btn-sm" onClick={() => void runDialerCycle()} disabled={runningCycle}>{runningCycle ? 'Running...' : 'Run Cycle'}</button>
-                        </div>
-                        {loadingDialer ? (
-                            <div className="topline">Loading dialer status...</div>
-                        ) : (
-                            <div className="precision-list">
-                                <div className="precision-list-item"><span>Worker</span><strong>{dialerStatus?.worker.running ? 'On' : 'Off'}</strong></div>
-                                <div className="precision-list-item"><span>Mode</span><strong className="mono">{dialerStatus?.worker.mode || '—'}</strong></div>
-                                <div className="precision-list-item"><span>Campaigns / Cycle</span><strong className="mono">{dialerStatus?.worker.lastStats?.campaignsChecked ?? 0}</strong></div>
-                                <div className="precision-list-item"><span>Contacts Dialed</span><strong className="mono">{dialerStatus?.worker.lastStats?.contactsDialed ?? 0}</strong></div>
-                            </div>
-                        )}
-                    </section>
                 </div>
             </div>
 
@@ -416,8 +340,17 @@ export default function CampaignsPage() {
                             <div><label>Campaign Name</label><input className="input" value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))} /></div>
                             <div><label>Description</label><textarea className="input" rows={3} value={form.description} onChange={(e) => setForm((current) => ({ ...current, description: e.target.value }))} /></div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                                <div><label>Dial Mode</label><select className="select" value={form.dialMode} onChange={(e) => setForm((current) => ({ ...current, dialMode: e.target.value }))}><option value="predictive">Predictive</option><option value="progressive">Progressive</option><option value="preview">Preview</option></select></div>
                                 <div><label>Timezone</label><select className="select" value={form.timezone} onChange={(e) => setForm((current) => ({ ...current, timezone: e.target.value }))}><option value="America/New_York">Eastern</option><option value="America/Chicago">Central</option><option value="America/Denver">Mountain</option><option value="America/Los_Angeles">Pacific</option></select></div>
+                                <div><label>Max Attempts Per Lead</label><input className="input" type="number" value={form.maxAttemptsPerLead} onChange={(e) => setForm((current) => ({ ...current, maxAttemptsPerLead: parseInt(e.target.value) || 1 }))} /></div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <input type="checkbox" checked={form.aiTargetEnabled} onChange={(e) => setForm((current) => ({ ...current, aiTargetEnabled: e.target.checked }))} />
+                                    <label style={{ margin: 0 }}>Enable AI Target</label>
+                                </div>
+                                {form.aiTargetEnabled && (
+                                    <div><label>AI Target</label><input className="input" value={form.aiTarget} onChange={(e) => setForm((current) => ({ ...current, aiTarget: e.target.value }))} placeholder="e.g. appointment-setter" /></div>
+                                )}
                             </div>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>

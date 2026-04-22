@@ -14,6 +14,10 @@ import { getBackendBaseUrl } from '../utils/backend-url';
 import { signalwireService } from '../services/signalwire';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { isWithinCallingWindow, getContactTimezone } from '../services/tcpa';
+import {
+    validate, initiateCallSchema, browserSessionSchema, browserStatusSchema,
+    dispositionSchema, transferSchema, simulateInboundSchema, inboundAttachSchema,
+} from '../lib/validation';
 
 const router = Router();
 const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
@@ -97,7 +101,7 @@ const resolveCampaignContactOutcome = async (callId: string, outcome: 'completed
 };
 
 // POST /api/calls/initiate — click-to-dial
-router.post('/initiate', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/initiate', authenticate, validate(initiateCallSchema), async (req: Request, res: Response): Promise<void> => {
     const { toNumber, fromNumber, accountId, accountName, mode = 'agent', aiTarget, amdEnabled, aiAgentId, dynamicVariables, metadata, mockScenario, reservationToken } = req.body;
     const isAiMode = mode === 'ai';
     const requestedCampaignContactId = req.body.campaignContactId as string | undefined;
@@ -365,7 +369,7 @@ router.post('/initiate', authenticate, async (req: Request, res: Response): Prom
     });
 });
 
-router.post('/browser-session', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/browser-session', authenticate, validate(browserSessionSchema), async (req: Request, res: Response): Promise<void> => {
     const { toNumber, fromNumber, accountId, accountName, reservationToken } = req.body;
     const requestedCampaignContactId = req.body.campaignContactId as string | undefined;
 
@@ -467,7 +471,7 @@ router.post('/browser-session', authenticate, async (req: Request, res: Response
     });
 });
 
-router.post('/:id/browser-status', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/browser-status', authenticate, validate(browserStatusSchema), async (req: Request, res: Response): Promise<void> => {
     const callId = paramValue(req.params.id);
     const {
         providerCallId,
@@ -475,13 +479,7 @@ router.post('/:id/browser-status', authenticate, async (req: Request, res: Respo
         previousRelayState,
         duration,
         details,
-    } = req.body as {
-        providerCallId?: string;
-        relayState?: string;
-        previousRelayState?: string;
-        duration?: number;
-        details?: Record<string, unknown>;
-    };
+    } = req.body;
 
     const existing = await prisma.call.findUnique({
         where: { id: callId },
@@ -659,17 +657,8 @@ router.get('/audit/recent', authenticate, async (req: Request, res: Response): P
 });
 
 // POST /api/calls/simulate/inbound — dev helper for inbound scenario simulation
-router.post('/simulate/inbound', authenticate, async (req: Request, res: Response): Promise<void> => {
-    const { scenario = 'answer', fromNumber, toNumber } = req.body as {
-        scenario?: 'answer' | 'no-answer' | 'voicemail';
-        fromNumber?: string;
-        toNumber?: string;
-    };
-
-    if (!['answer', 'no-answer', 'voicemail'].includes(scenario)) {
-        res.status(400).json({ error: 'scenario must be one of: answer, no-answer, voicemail' });
-        return;
-    }
+router.post('/simulate/inbound', authenticate, validate(simulateInboundSchema), async (req: Request, res: Response): Promise<void> => {
+    const { scenario, fromNumber, toNumber } = req.body;
 
     const callSid = `SIM-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const sourceNumber = fromNumber || `+1555${String(Math.floor(Math.random() * 9000000) + 1000000)}`;
@@ -754,17 +743,8 @@ router.post('/simulate/inbound', authenticate, async (req: Request, res: Respons
 });
 
 // POST /api/calls/inbound/attach — fetch/create inbound call for accepted softphone invite
-router.post('/inbound/attach', authenticate, async (req: Request, res: Response): Promise<void> => {
-    const { callSid, fromNumber, toNumber } = req.body as {
-        callSid?: string;
-        fromNumber?: string;
-        toNumber?: string;
-    };
-
-    if (!callSid) {
-        res.status(400).json({ error: 'callSid is required' });
-        return;
-    }
+router.post('/inbound/attach', authenticate, validate(inboundAttachSchema), async (req: Request, res: Response): Promise<void> => {
+    const { callSid, fromNumber, toNumber } = req.body;
 
     const existing = await prisma.call.findFirst({
         where: { signalwireCallSid: callSid },
@@ -938,6 +918,12 @@ router.get('/:id', authenticate, async (req: Request, res: Response): Promise<vo
         return;
     }
 
+    // Agents can only view their own calls
+    if (req.user!.role === 'agent' && call.agentId !== req.user!.id) {
+        res.status(403).json({ error: 'Access denied' });
+        return;
+    }
+
     res.json(call);
 });
 
@@ -946,11 +932,17 @@ router.get('/:id/audit', authenticate, async (req: Request, res: Response): Prom
     const callId = paramValue(req.params.id);
     const call = await prisma.call.findUnique({
         where: { id: callId },
-        select: { id: true, signalwireCallSid: true, createdAt: true, completedAt: true, status: true },
+        select: { id: true, agentId: true, signalwireCallSid: true, createdAt: true, completedAt: true, status: true },
     });
 
     if (!call) {
         res.status(404).json({ error: 'Call not found' });
+        return;
+    }
+
+    // Agents can only view audit for their own calls
+    if (req.user!.role === 'agent' && call.agentId !== req.user!.id) {
+        res.status(403).json({ error: 'Access denied' });
         return;
     }
 
@@ -965,13 +957,9 @@ router.get('/:id/audit', authenticate, async (req: Request, res: Response): Prom
 });
 
 // POST /api/calls/:id/disposition — wrap-up submission
-router.post('/:id/disposition', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/disposition', authenticate, validate(dispositionSchema), async (req: Request, res: Response): Promise<void> => {
     const callId = paramValue(req.params.id);
     const { dispositionId, note, callbackAt } = req.body;
-    if (!dispositionId) {
-        res.status(400).json({ error: 'dispositionId is required' });
-        return;
-    }
 
     const call = await prisma.call.update({
         where: { id: callId },
@@ -1039,14 +1027,9 @@ router.post('/:id/disposition', authenticate, async (req: Request, res: Response
 });
 
 // POST /api/calls/:id/transfer — cold or warm
-router.post('/:id/transfer', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/:id/transfer', authenticate, validate(transferSchema), async (req: Request, res: Response): Promise<void> => {
     const callId = paramValue(req.params.id);
-    const { targetNumber, type = 'cold' } = req.body;
-
-    if (!targetNumber) {
-        res.status(400).json({ error: 'targetNumber is required' });
-        return;
-    }
+    const { targetNumber, type } = req.body;
 
     const call = await prisma.call.findUnique({ where: { id: callId } });
     if (!call || !(call.providerCallId || call.signalwireCallSid)) {

@@ -42,6 +42,9 @@ interface SummaryStats {
     voicemail: number;
     abandonedEvents: number;
     guardrailBlocks: number;
+    aiCalls: number;
+    aiCompleted: number;
+    aiAvgDuration: number;
     answerRate: string;
     abandonRate: string;
     avgDuration: number;
@@ -60,7 +63,7 @@ interface HourlyStat {
 
 export default function ReportsPage() {
     const { hasRole } = useAuth();
-    const [tab, setTab] = useState<'overview' | 'agents' | 'calllog'>('overview');
+    const [tab, setTab] = useState<'overview' | 'agents' | 'calllog' | 'ai'>('overview');
     const [summary, setSummary] = useState<SummaryStats | null>(null);
     const [hourly, setHourly] = useState<HourlyStat[]>([]);
     const [agentStats, setAgentStats] = useState<AgentStat[]>([]);
@@ -107,6 +110,7 @@ export default function ReportsPage() {
                     <button className={`btn ${tab === 'overview' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('overview')}>Overview</button>
                     <button className={`btn ${tab === 'agents' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('agents')}>Agents</button>
                     <button className={`btn ${tab === 'calllog' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('calllog')}>Call Log</button>
+                    <button className={`btn ${tab === 'ai' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('ai')}>AI Performance</button>
                 </div>
             </div>
 
@@ -121,7 +125,7 @@ export default function ReportsPage() {
                         <div className="stat-card"><div className="stat-value">{formatDuration(summary.avgDuration)}</div><div className="stat-label">Avg Duration</div></div>
                         <div className="stat-card"><div className="stat-value">{summary.completed}</div><div className="stat-label">Completed</div></div>
                         <div className="stat-card"><div className="stat-value">{summary.abandonedEvents}</div><div className="stat-label">Missed Connects</div></div>
-                        <div className="stat-card"><div className="stat-value">{summary.guardrailBlocks}</div><div className="stat-label">Guardrail Blocks</div></div>
+                        <div className="stat-card"><div className="stat-value">{summary.aiCalls ?? 0}</div><div className="stat-label">AI Calls</div></div>
                         <div className="stat-card"><div className="stat-value">{summary.noAnswer}</div><div className="stat-label">No Answer</div></div>
                         <div className="stat-card"><div className="stat-value">{summary.failed + summary.busy + summary.voicemail}</div><div className="stat-label">Other Outcomes</div></div>
                     </div>
@@ -261,6 +265,19 @@ export default function ReportsPage() {
                             <button className="btn btn-secondary btn-sm" disabled={logPage <= 1} onClick={() => setLogPage((p) => p - 1)}>Prev</button>
                             <button className="btn btn-secondary btn-sm" onClick={() => setLogPage((p) => p + 1)}>Next</button>
                         </div>
+                    </div>
+                </>
+            )}
+
+            {tab === 'ai' && summary && (
+                <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+                        <div className="stat-card"><div className="stat-value">{summary.aiCalls ?? 0}</div><div className="stat-label">AI Calls</div></div>
+                        <div className="stat-card"><div className="stat-value">{summary.aiCompleted ?? 0}</div><div className="stat-label">AI Completed</div></div>
+                        <div className="stat-card"><div className="stat-value">{formatDuration(summary.aiAvgDuration ?? 0)}</div><div className="stat-label">AI Avg Duration</div></div>
+                    </div>
+                    <div className="glass-panel" style={{ padding: 20 }}>
+                        <p style={{ color: 'var(--text-secondary)' }}>View detailed AI agent performance on the AI Agents page.</p>
                     </div>
                 </>
             )}

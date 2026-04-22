@@ -28,6 +28,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Agent tool configs (local-only)
+.claude/
+.mcp.json
+
 # Prisma
 prisma/elitedial.db
 

@@ -3,6 +3,43 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { AICallProvider, AICallRequest, AICallResult } from './providers/types';
 
+export interface RetellAgent {
+    agent_id: string;
+    agent_name: string;
+    voice_id?: string;
+    language?: string;
+    response_engine?: { type: string; llm_id?: string };
+    last_modification_timestamp?: number;
+    [key: string]: unknown;
+}
+
+const MOCK_AGENTS: RetellAgent[] = [
+    {
+        agent_id: 'mock-agent-001',
+        agent_name: 'Collections Agent - English',
+        voice_id: 'eleven_turbo_v2',
+        language: 'en-US',
+        response_engine: { type: 'retell-llm', llm_id: 'mock-llm-001' },
+        last_modification_timestamp: Date.now(),
+    },
+    {
+        agent_id: 'mock-agent-002',
+        agent_name: 'Payment Reminder Agent',
+        voice_id: 'eleven_turbo_v2',
+        language: 'en-US',
+        response_engine: { type: 'retell-llm', llm_id: 'mock-llm-002' },
+        last_modification_timestamp: Date.now(),
+    },
+    {
+        agent_id: 'mock-agent-003',
+        agent_name: 'Collections Agent - Spanish',
+        voice_id: 'eleven_multilingual_v2',
+        language: 'es-ES',
+        response_engine: { type: 'retell-llm', llm_id: 'mock-llm-003' },
+        last_modification_timestamp: Date.now(),
+    },
+];
+
 class RetellService implements AICallProvider {
     readonly name = 'retell';
 
@@ -56,6 +93,38 @@ class RetellService implements AICallProvider {
             };
         } catch (error) {
             logger.error('Retell outbound call failed', { error });
+            return null;
+        }
+    }
+
+    async listAgents(): Promise<RetellAgent[]> {
+        if (!this.isConfigured) {
+            return MOCK_AGENTS;
+        }
+        try {
+            const response = await axios.get(`${config.retell.baseUrl}/v2/list-agents`, {
+                headers: { 'Authorization': `Bearer ${config.retell.apiKey}` },
+                timeout: 10000,
+            });
+            return (response.data || []) as RetellAgent[];
+        } catch (error) {
+            logger.error('Retell listAgents failed', { error });
+            return [];
+        }
+    }
+
+    async getAgent(agentId: string): Promise<RetellAgent | null> {
+        if (!this.isConfigured) {
+            return MOCK_AGENTS.find(a => a.agent_id === agentId) || null;
+        }
+        try {
+            const response = await axios.get(`${config.retell.baseUrl}/v2/get-agent/${encodeURIComponent(agentId)}`, {
+                headers: { 'Authorization': `Bearer ${config.retell.apiKey}` },
+                timeout: 10000,
+            });
+            return response.data as RetellAgent;
+        } catch (error) {
+            logger.error('Retell getAgent failed', { agentId, error });
             return null;
         }
     }

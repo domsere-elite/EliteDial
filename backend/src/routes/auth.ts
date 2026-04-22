@@ -4,17 +4,14 @@ import { prisma } from '../lib/prisma';
 import { generateToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
+import { validate, loginSchema, refreshSchema, changePasswordSchema, registerSchema, blacklistToken } from '../lib/validation';
 
 const router = Router();
 
 // POST /api/auth/login
-router.post('/login', async (req: Request, res: Response): Promise<void> => {
+router.post('/login', validate(loginSchema), async (req: Request, res: Response): Promise<void> => {
     try {
         const { username, password } = req.body;
-        if (!username || !password) {
-            res.status(400).json({ error: 'Username and password required' });
-            return;
-        }
 
         const user = await prisma.user.findUnique({ where: { username } });
         if (!user) {
@@ -36,6 +33,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 
         res.json({
             token,
+            refreshToken,
             user: {
                 id: user.id,
                 username: user.username,
@@ -52,13 +50,9 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 });
 
 // POST /api/auth/refresh
-router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
+router.post('/refresh', validate(refreshSchema), async (req: Request, res: Response): Promise<void> => {
     try {
         const { refreshToken } = req.body;
-        if (!refreshToken) {
-            res.status(400).json({ error: 'Refresh token required' });
-            return;
-        }
 
         let payload;
         try {
@@ -84,18 +78,9 @@ router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
 });
 
 // POST /api/auth/change-password
-router.post('/change-password', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.post('/change-password', authenticate, validate(changePasswordSchema), async (req: Request, res: Response): Promise<void> => {
     try {
         const { currentPassword, newPassword } = req.body;
-        if (!currentPassword || !newPassword) {
-            res.status(400).json({ error: 'Current and new password are required' });
-            return;
-        }
-
-        if (newPassword.length < 8) {
-            res.status(400).json({ error: 'New password must be at least 8 characters' });
-            return;
-        }
 
         const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
         if (!user) {
@@ -122,13 +107,9 @@ router.post('/change-password', authenticate, async (req: Request, res: Response
 });
 
 // POST /api/auth/register (admin only)
-router.post('/register', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/register', authenticate, requireRole('admin'), validate(registerSchema), async (req: Request, res: Response): Promise<void> => {
     try {
         const { username, email, password, firstName, lastName, role, extension } = req.body;
-        if (!username || !email || !password || !firstName || !lastName) {
-            res.status(400).json({ error: 'All fields required' });
-            return;
-        }
 
         const existing = await prisma.user.findFirst({
             where: { OR: [{ username }, { email }] },
@@ -151,6 +132,21 @@ router.post('/register', authenticate, requireRole('admin'), async (req: Request
             lastName: user.lastName,
             role: user.role,
         });
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// POST /api/auth/logout — blacklist current token
+router.post('/logout', authenticate, async (req: Request, res: Response): Promise<void> => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (authHeader) {
+            const token = authHeader.split(' ')[1];
+            blacklistToken(token);
+        }
+        await prisma.user.update({ where: { id: req.user!.id }, data: { status: 'offline' } });
+        res.json({ message: 'Logged out successfully' });
     } catch (err) {
         res.status(500).json({ error: 'Internal server error' });
     }

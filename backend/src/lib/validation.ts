@@ -1,0 +1,239 @@
+import { z } from 'zod';
+import { Request, Response, NextFunction } from 'express';
+
+// ─── Validation Middleware ───────────────────────
+export function validate<T extends z.ZodType>(schema: T) {
+    return (req: Request, res: Response, next: NextFunction): void => {
+        const result = schema.safeParse(req.body);
+        if (!result.success) {
+            const errors = result.error.issues.map((i) => ({
+                path: i.path.join('.'),
+                message: i.message,
+            }));
+            res.status(400).json({ error: 'Validation failed', details: errors });
+            return;
+        }
+        req.body = result.data;
+        next();
+    };
+}
+
+// ─── Shared primitives ──────────────────────────
+const phoneNumber = z.string().min(1).max(30);
+const optionalString = z.string().optional();
+
+// ─── Auth Schemas ────────────────────────────────
+export const loginSchema = z.object({
+    username: z.string().min(1, 'Username is required'),
+    password: z.string().min(1, 'Password is required'),
+});
+
+export const refreshSchema = z.object({
+    refreshToken: z.string().min(1, 'Refresh token is required'),
+});
+
+export const changePasswordSchema = z.object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+});
+
+export const registerSchema = z.object({
+    username: z.string().min(1, 'Username is required').max(100),
+    email: z.string().email('Valid email is required'),
+    password: z.string().min(8, 'Password must be at least 8 characters'),
+    firstName: z.string().min(1, 'First name is required').max(100),
+    lastName: z.string().min(1, 'Last name is required').max(100),
+    role: z.enum(['agent', 'supervisor', 'admin']).optional().default('agent'),
+    extension: optionalString,
+});
+
+// ─── Agent Schemas ───────────────────────────────
+export const updateAgentStatusSchema = z.object({
+    status: z.enum(['available', 'break', 'offline', 'on-call']),
+});
+
+// ─── Call Schemas ────────────────────────────────
+export const initiateCallSchema = z.object({
+    toNumber: phoneNumber,
+    fromNumber: optionalString,
+    accountId: optionalString,
+    accountName: optionalString,
+    mode: z.enum(['agent', 'ai']).optional().default('agent'),
+    aiTarget: optionalString,
+    amdEnabled: z.boolean().optional(),
+    aiAgentId: optionalString,
+    dynamicVariables: z.record(z.string(), z.unknown()).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+    mockScenario: optionalString,
+    reservationToken: optionalString,
+    campaignContactId: optionalString,
+});
+
+export const browserSessionSchema = z.object({
+    toNumber: phoneNumber,
+    fromNumber: optionalString,
+    accountId: optionalString,
+    accountName: optionalString,
+    reservationToken: optionalString,
+    campaignContactId: optionalString,
+});
+
+export const browserStatusSchema = z.object({
+    providerCallId: optionalString,
+    relayState: optionalString,
+    previousRelayState: optionalString,
+    duration: z.number().optional(),
+    details: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const dispositionSchema = z.object({
+    dispositionId: z.string().min(1, 'dispositionId is required'),
+    note: optionalString,
+    callbackAt: z.string().datetime().optional().or(z.string().optional()),
+});
+
+export const transferSchema = z.object({
+    targetNumber: phoneNumber,
+    type: z.enum(['cold', 'warm']).optional().default('cold'),
+});
+
+export const simulateInboundSchema = z.object({
+    scenario: z.enum(['answer', 'no-answer', 'voicemail']).optional().default('answer'),
+    fromNumber: optionalString,
+    toNumber: optionalString,
+});
+
+export const inboundAttachSchema = z.object({
+    callSid: z.string().min(1, 'callSid is required'),
+    fromNumber: optionalString,
+    toNumber: optionalString,
+});
+
+// ─── Campaign Schemas ────────────────────────────
+export const createCampaignSchema = z.object({
+    name: z.string().min(1, 'Name is required').max(200),
+    description: optionalString,
+    dialMode: z.enum(['manual', 'preview', 'progressive', 'predictive']).optional().default('predictive'),
+    timezone: z.string().optional().default('America/Chicago'),
+    maxAttemptsPerLead: z.number().int().min(1).max(50).optional().default(6),
+    abandonRateLimit: z.number().min(0).max(1).optional().default(0.03),
+    dialRatio: z.number().min(0.5).max(20).optional().default(3),
+    retryDelaySeconds: z.number().int().min(30).optional().default(600),
+    maxConcurrentCalls: z.number().int().min(0).optional().default(0),
+    aiTargetEnabled: z.boolean().optional().default(false),
+    aiTarget: optionalString,
+});
+
+export const updateCampaignSchema = z.object({
+    name: optionalString,
+    description: optionalString,
+    dialMode: z.enum(['manual', 'preview', 'progressive', 'predictive']).optional(),
+    timezone: z.string().optional(),
+    maxAttemptsPerLead: z.number().int().min(1).max(50).optional(),
+    abandonRateLimit: z.number().min(0).max(1).optional(),
+    dialRatio: z.number().min(0.5).max(20).optional(),
+    retryDelaySeconds: z.number().int().min(30).optional(),
+    maxConcurrentCalls: z.number().int().min(0).optional(),
+    aiTargetEnabled: z.boolean().optional(),
+    aiTarget: optionalString,
+});
+
+export const createCampaignListSchema = z.object({
+    name: z.string().min(1, 'Name is required'),
+    sourceType: z.string().optional().default('upload'),
+});
+
+export const importContactsSchema = z.object({
+    rows: z.array(z.object({
+        firstName: optionalString,
+        lastName: optionalString,
+        phone: optionalString,
+        email: optionalString,
+        accountId: optionalString,
+        externalId: optionalString,
+        timezone: optionalString,
+        priority: z.number().optional(),
+    })).optional(),
+    csv: z.string().optional(),
+    listName: optionalString,
+});
+
+// ─── Admin Schemas ───────────────────────────────
+export const updateAgentSchema = z.object({
+    firstName: z.string().min(1).max(100).optional(),
+    lastName: z.string().min(1).max(100).optional(),
+    email: z.string().email().optional(),
+    role: z.enum(['agent', 'supervisor', 'admin']).optional(),
+    extension: optionalString,
+});
+
+export const resetPasswordSchema = z.object({
+    newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+});
+
+export const createPhoneSchema = z.object({
+    number: z.string().min(1, 'Number is required'),
+    label: optionalString,
+    type: z.string().optional(),
+    assignedTo: optionalString,
+});
+
+export const addDncSchema = z.object({
+    phoneNumber: phoneNumber,
+    reason: optionalString,
+});
+
+export const bulkDncImportSchema = z.object({
+    numbers: z.array(z.string()).min(1, 'numbers must be a non-empty array'),
+    reason: optionalString,
+});
+
+export const updateQueueSchema = z.object({
+    holdTimeout: z.number().int().optional(),
+    overflowAction: z.string().optional(),
+    holdMusicUrl: z.string().url().optional().or(z.literal('')).optional(),
+    maxQueueSize: z.number().int().min(0).optional(),
+    isActive: z.boolean().optional(),
+});
+
+export const createDispositionSchema = z.object({
+    code: z.string().min(1, 'Code is required'),
+    label: z.string().min(1, 'Label is required'),
+    category: z.string().optional(),
+});
+
+export const createApiKeySchema = z.object({
+    label: z.string().optional(),
+});
+
+export const createWebhookSchema = z.object({
+    url: z.string().url('Valid URL is required'),
+    secret: optionalString,
+    events: z.array(z.string()).optional(),
+});
+
+// ─── Voicemail Schemas ───────────────────────────
+export const assignVoicemailSchema = z.object({
+    agentId: z.string().min(1, 'agentId is required'),
+});
+
+// ─── Token Blacklist (in-memory, simple) ─────────
+// For production, use Redis or a DB table
+const blacklistedTokens = new Set<string>();
+const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+export function blacklistToken(token: string): void {
+    blacklistedTokens.add(token);
+}
+
+export function isTokenBlacklisted(token: string): boolean {
+    return blacklistedTokens.has(token);
+}
+
+// Periodic cleanup to prevent unbounded growth
+// Tokens naturally expire via JWT expiry, so we just need to bound memory
+setInterval(() => {
+    if (blacklistedTokens.size > 10000) {
+        blacklistedTokens.clear();
+    }
+}, TOKEN_CLEANUP_INTERVAL_MS);

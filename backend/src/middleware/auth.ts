@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, TokenPayload } from '../utils/jwt';
 import { prisma } from '../lib/prisma';
+import { isTokenBlacklisted } from '../lib/validation';
 
 declare global {
     namespace Express {
@@ -19,6 +20,12 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 
     try {
         const token = authHeader.split(' ')[1];
+
+        if (isTokenBlacklisted(token)) {
+            res.status(401).json({ error: 'Token has been revoked' });
+            return;
+        }
+
         const payload = verifyToken(token);
         req.user = { ...payload, id: payload.userId };
         next();

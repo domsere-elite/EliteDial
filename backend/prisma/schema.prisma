@@ -64,6 +64,8 @@ model Call {
   @@index([createdAt])
   @@index([status])
   @@index([provider, providerCallId])
+  @@index([agentId, createdAt])
+  @@index([direction, createdAt])
 }
 
 model CallSession {
@@ -187,6 +189,8 @@ model Voicemail {
 
   @@index([assignedToId])
   @@index([isRead])
+  @@index([assignedToId, isRead])
+  @@index([createdAt])
 }
 
 model DNCEntry {
@@ -350,6 +354,8 @@ model CampaignContact {
   @@index([campaignId, status])
   @@index([campaignId, reservationExpiresAt])
   @@index([listId])
+  @@index([campaignId, priority, nextAttemptAt])
+  @@index([status, nextAttemptAt])
 }
 
 model CampaignAttempt {
@@ -369,6 +375,8 @@ model CampaignAttempt {
   @@index([contactId])
   @@index([callId])
   @@index([startedAt])
+  @@index([campaignId, status, completedAt])
+  @@index([campaignId, completedAt])
 }
 
 model DIDGroup {

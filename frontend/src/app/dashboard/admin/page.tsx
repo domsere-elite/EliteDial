@@ -73,7 +73,7 @@ const emptyAgentForm: AgentFormState = {
 
 export default function AdminPage() {
     const { hasRole } = useAuth();
-    const [tab, setTab] = useState<'agents' | 'phones' | 'dnc' | 'queues'>('agents');
+    const [tab, setTab] = useState<'agents' | 'phones' | 'dnc' | 'queues' | 'diagnostics' | 'security'>('agents');
 
     const [agents, setAgents] = useState<Agent[]>([]);
     const [showAgentForm, setShowAgentForm] = useState(false);
@@ -91,6 +91,15 @@ export default function AdminPage() {
     const [dncTotal, setDncTotal] = useState(0);
 
     const [queues, setQueues] = useState<QueueRec[]>([]);
+
+    // Diagnostics
+    const [diagData, setDiagData] = useState<{ summary: { activeSignalWireSessions: number; signalwireCalls24h: number; inbound24h: number; outbound24h: number; completed24h: number; webhookEvents24h: number }; recentCalls: Array<{ id: string; createdAt: string; direction: string; status: string; providerCallId: string | null; agent: { name: string } | null }>; recentEvents: Array<{ id: string; createdAt: string; source: string; type: string; status: string | null }> } | null>(null);
+    const [diagLoading, setDiagLoading] = useState(false);
+
+    // Security
+    const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    const [pwSaving, setPwSaving] = useState(false);
+    const [pwMessage, setPwMessage] = useState<string | null>(null);
 
     const buildAgentEdit = (agent: Agent): AgentEditState => ({
         firstName: agent.firstName,
@@ -125,6 +134,16 @@ export default function AdminPage() {
             if (tab === 'queues') {
                 const response = await api.get('/admin/queues');
                 setQueues(response.data);
+            }
+
+            if (tab === 'diagnostics') {
+                setDiagLoading(true);
+                try {
+                    const response = await api.get('/system/signalwire/diagnostics');
+                    setDiagData(response.data);
+                } finally {
+                    setDiagLoading(false);
+                }
             }
         } catch {
             // Intentionally quiet for now; existing admin page follows the same pattern.
@@ -217,11 +236,31 @@ export default function AdminPage() {
         await loadTab();
     };
 
+    const changePassword = async () => {
+        if (pwForm.newPassword !== pwForm.confirmPassword) {
+            setPwMessage('Passwords do not match.');
+            return;
+        }
+        setPwSaving(true);
+        setPwMessage(null);
+        try {
+            await api.post('/auth/change-password', { currentPassword: pwForm.currentPassword, newPassword: pwForm.newPassword });
+            setPwMessage('Password changed successfully.');
+            setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        } catch {
+            setPwMessage('Failed to change password.');
+        } finally {
+            setPwSaving(false);
+        }
+    };
+
     const tabs = [
         { key: 'agents', label: 'Agents' },
         { key: 'phones', label: 'Phone Numbers' },
         { key: 'dnc', label: 'DNC List' },
         { key: 'queues', label: 'Queues' },
+        { key: 'diagnostics', label: 'Diagnostics' },
+        { key: 'security', label: 'Security' },
     ] as const;
 
     return (
@@ -229,7 +268,7 @@ export default function AdminPage() {
             <div className="page-header" style={{ marginBottom: 0 }}>
                 <div>
                     <h1>Admin</h1>
-                    <div className="topline">Manage users, numbers, compliance suppression, and queue settings.</div>
+                    <div className="topline">Manage users, numbers, compliance suppression, queues, diagnostics, and security.</div>
                 </div>
             </div>
 
@@ -517,6 +556,102 @@ export default function AdminPage() {
                             ))}
                         </tbody>
                     </table>
+                </div>
+            )}
+
+            {tab === 'diagnostics' && (
+                <>
+                    {diagLoading || !diagData ? (
+                        <div className="glass-panel" style={{ padding: 24 }}>
+                            <div className="topline">Loading diagnostics...</div>
+                        </div>
+                    ) : (
+                        <>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10 }}>
+                                <div className="stat-card"><div className="stat-value mono">{diagData.summary.activeSignalWireSessions}</div><div className="stat-label">Active Sessions</div></div>
+                                <div className="stat-card"><div className="stat-value mono">{diagData.summary.signalwireCalls24h}</div><div className="stat-label">Calls 24h</div></div>
+                                <div className="stat-card"><div className="stat-value mono">{diagData.summary.inbound24h}</div><div className="stat-label">Inbound 24h</div></div>
+                                <div className="stat-card"><div className="stat-value mono">{diagData.summary.outbound24h}</div><div className="stat-label">Outbound 24h</div></div>
+                                <div className="stat-card"><div className="stat-value mono">{diagData.summary.completed24h}</div><div className="stat-label">Completed 24h</div></div>
+                                <div className="stat-card"><div className="stat-value mono">{diagData.summary.webhookEvents24h}</div><div className="stat-label">Webhook Events</div></div>
+                            </div>
+
+                            <div className="glass-panel" style={{ padding: 18, overflow: 'auto' }}>
+                                <div className="status-row" style={{ marginBottom: 10 }}>
+                                    <h3>Recent SignalWire Calls</h3>
+                                    <span className="topline mono">{diagData.recentCalls.length} rows</span>
+                                </div>
+                                <table className="data-table">
+                                    <thead>
+                                        <tr><th>Time</th><th>Direction</th><th>Status</th><th>Provider SID</th><th>Agent</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {diagData.recentCalls.map((call) => (
+                                            <tr key={call.id}>
+                                                <td className="mono">{new Date(call.createdAt).toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
+                                                <td className="mono">{call.direction}</td>
+                                                <td><span className={`status-badge ${call.status === 'completed' ? 'status-available' : call.status === 'in-progress' ? 'status-on-call' : 'status-offline'}`}>{call.status}</span></td>
+                                                <td className="mono">{call.providerCallId || '-'}</td>
+                                                <td>{call.agent?.name || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="glass-panel" style={{ padding: 18, overflow: 'auto' }}>
+                                <div className="status-row" style={{ marginBottom: 10 }}>
+                                    <h3>Recent Webhook Events</h3>
+                                    <span className="topline mono">{diagData.recentEvents.length} events</span>
+                                </div>
+                                <table className="data-table">
+                                    <thead>
+                                        <tr><th>Time</th><th>Source</th><th>Type</th><th>Status</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        {diagData.recentEvents.map((event) => (
+                                            <tr key={event.id}>
+                                                <td className="mono">{new Date(event.createdAt).toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
+                                                <td className="mono">{event.source}</td>
+                                                <td className="mono">{event.type}</td>
+                                                <td className="mono">{event.status || '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button className="btn btn-secondary" onClick={() => loadTab()}>Refresh</button>
+                            </div>
+                        </>
+                    )}
+                </>
+            )}
+
+            {tab === 'security' && (
+                <div className="glass-panel" style={{ padding: 20, maxWidth: 480 }}>
+                    <h3 style={{ marginBottom: 16 }}>Change Password</h3>
+                    <div style={{ display: 'grid', gap: 12 }}>
+                        <div>
+                            <label>Current Password</label>
+                            <input className="input" type="password" value={pwForm.currentPassword} onChange={(e) => setPwForm({ ...pwForm, currentPassword: e.target.value })} />
+                        </div>
+                        <div>
+                            <label>New Password</label>
+                            <input className="input" type="password" value={pwForm.newPassword} onChange={(e) => setPwForm({ ...pwForm, newPassword: e.target.value })} />
+                        </div>
+                        <div>
+                            <label>Confirm New Password</label>
+                            <input className="input" type="password" value={pwForm.confirmPassword} onChange={(e) => setPwForm({ ...pwForm, confirmPassword: e.target.value })} />
+                        </div>
+                        {pwMessage && <div className={`topline ${pwMessage.includes('success') ? '' : 'notice notice-error'}`} style={{ marginTop: 4 }}>{pwMessage}</div>}
+                        <div>
+                            <button className="btn btn-primary" onClick={() => void changePassword()} disabled={pwSaving || !pwForm.currentPassword || !pwForm.newPassword || !pwForm.confirmPassword}>
+                                {pwSaving ? 'Saving...' : 'Change Password'}
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

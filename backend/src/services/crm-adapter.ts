@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { crmRetryQueue } from './crm-retry-queue';
 
 export interface AccountInfo {
     accountId: string;
@@ -71,7 +72,8 @@ class HttpCRMConnector implements CRMConnector {
             await this.client.post(url, payload);
             return true;
         } catch (error) {
-            logger.warn('CRM POST failed', { url, error });
+            logger.warn('CRM POST failed, queuing for retry', { url, error });
+            crmRetryQueue.enqueue(url, payload);
             return false;
         }
     }

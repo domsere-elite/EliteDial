@@ -1,0 +1,2340 @@
+openapi: 3.0.3
+info:
+  title: EliteDial API
+  description: Backend API for the EliteDial predictive dialer and call center platform.
+  version: 1.0.0
+
+servers:
+  - url: /api
+    description: Main API (all routes except webhooks)
+  - url: /
+    description: Root (health check and webhook endpoints)
+
+tags:
+  - name: Auth
+    description: Authentication and user session management
+  - name: Agents
+    description: Agent listing, status, stats, and telephony tokens
+  - name: Calls
+    description: Call initiation, lifecycle, disposition, and history
+  - name: Campaigns
+    description: Campaign CRUD, contact lists, imports, and dialer control
+  - name: Voicemails
+    description: Voicemail inbox and assignment
+  - name: Reports
+    description: Supervisor reporting and analytics
+  - name: Admin
+    description: Administrative management of agents, phones, DNC, queues, dispositions, API keys, and webhooks
+  - name: System
+    description: System readiness and diagnostics
+  - name: Health
+    description: Health check
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+          enum: [agent, supervisor, admin]
+        status:
+          type: string
+          enum: [available, break, offline, on-call]
+        extension:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    Call:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          enum: [signalwire, retell, telnyx, mock]
+        channel:
+          type: string
+          enum: [human, ai]
+        mode:
+          type: string
+          enum: [manual, preview, progressive, predictive, ai_outbound, inbound]
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        fromNumber:
+          type: string
+        toNumber:
+          type: string
+        status:
+          type: string
+          enum: [initiated, ringing, in-progress, completed, failed, no-answer, busy, voicemail]
+        duration:
+          type: integer
+          description: Duration in seconds
+        recordingUrl:
+          type: string
+          nullable: true
+        dispositionId:
+          type: string
+          nullable: true
+        dispositionNote:
+          type: string
+          nullable: true
+        accountId:
+          type: string
+          nullable: true
+        accountName:
+          type: string
+          nullable: true
+        agentId:
+          type: string
+          format: uuid
+          nullable: true
+        providerCallId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [draft, active, paused, completed, archived]
+        dialMode:
+          type: string
+          enum: [predictive, progressive, preview]
+        timezone:
+          type: string
+        maxAttemptsPerLead:
+          type: integer
+        abandonRateLimit:
+          type: number
+          format: float
+        dialRatio:
+          type: number
+          format: float
+        retryDelaySeconds:
+          type: integer
+        maxConcurrentCalls:
+          type: integer
+        aiTargetEnabled:
+          type: boolean
+        aiTarget:
+          type: string
+          nullable: true
+        createdById:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Voicemail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        fromNumber:
+          type: string
+        toNumber:
+          type: string
+        audioUrl:
+          type: string
+          nullable: true
+        transcription:
+          type: string
+          nullable: true
+        duration:
+          type: integer
+        isRead:
+          type: boolean
+        assignedToId:
+          type: string
+          format: uuid
+          nullable: true
+        assignedTo:
+          $ref: '#/components/schemas/UserSummary'
+        createdAt:
+          type: string
+          format: date-time
+
+    UserSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: string
+
+    PhoneNumber:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+        label:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [local, toll-free, mobile]
+        assignedTo:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    DNCEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phoneNumber:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        addedBy:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    QueueConfig:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        holdTimeout:
+          type: integer
+        overflowAction:
+          type: string
+          enum: [voicemail, virtual-agent, continue-hold]
+        holdMusicUrl:
+          type: string
+          nullable: true
+        maxQueueSize:
+          type: integer
+        isActive:
+          type: boolean
+
+    DispositionCode:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        label:
+          type: string
+        category:
+          type: string
+          enum: [payment, promise, skip, general]
+        isActive:
+          type: boolean
+
+    APIKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        label:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        lastUsed:
+          type: string
+          format: date-time
+          nullable: true
+
+    WebhookConfig:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+        secret:
+          type: string
+        events:
+          type: string
+          description: Comma-separated event names
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CampaignList:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sourceType:
+          type: string
+          enum: [upload, api, crm]
+        uploadStatus:
+          type: string
+          enum: [pending, imported, failed]
+        totalRecords:
+          type: integer
+        validRecords:
+          type: integer
+        duplicateSuppressed:
+          type: integer
+        dncSuppressed:
+          type: integer
+        invalidRecords:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    CampaignContact:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        campaignId:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        primaryPhone:
+          type: string
+        email:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [queued, dialing, connected, completed, suppressed-dnc, failed]
+        priority:
+          type: integer
+        attemptCount:
+          type: integer
+
+    ImportResult:
+      type: object
+      properties:
+        listId:
+          type: string
+          format: uuid
+        totalRecords:
+          type: integer
+        validRecords:
+          type: integer
+        invalidRecords:
+          type: integer
+        duplicateSuppressed:
+          type: integer
+        dncSuppressed:
+          type: integer
+
+    Paginated:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────────────────────────────────────────────
+  # Auth
+  # ───────────────────────────────────────────────
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate and obtain JWT tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  refreshToken:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh an expired access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  refreshToken:
+                    type: string
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the current user's password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '401':
+          description: Current password incorrect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password, firstName, lastName]
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                role:
+                  type: string
+                  enum: [agent, supervisor, admin]
+                extension:
+                  type: string
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          description: Username or email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out and blacklist the current token
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the current authenticated user
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  # ───────────────────────────────────────────────
+  # Agents
+  # ───────────────────────────────────────────────
+  /agents:
+    get:
+      tags: [Agents]
+      summary: List all agents (supervisor+)
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+
+  /agents/{id}/status:
+    patch:
+      tags: [Agents]
+      summary: Update agent availability status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [available, break, offline, on-call]
+      responses:
+        '200':
+          description: Updated agent status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  username:
+                    type: string
+                  status:
+                    type: string
+        '403':
+          description: Cannot update another agent's status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/{id}/stats:
+    get:
+      tags: [Agents]
+      summary: Get agent performance stats for today (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Agent stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  agentId:
+                    type: string
+                  today:
+                    type: object
+                    properties:
+                      totalCalls:
+                        type: integer
+                      answeredCalls:
+                        type: integer
+                      answerRate:
+                        type: string
+                      avgDuration:
+                        type: integer
+                  dispositions:
+                    type: array
+                    items:
+                      type: object
+
+  /agents/token/signalwire:
+    get:
+      tags: [Agents]
+      summary: Get a SignalWire browser softphone token
+      responses:
+        '200':
+          description: Browser token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  spaceUrl:
+                    type: string
+        '402':
+          description: Insufficient balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Subscriber provisioning disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /agents/token/signalwire-relay:
+    get:
+      tags: [Agents]
+      summary: Get a SignalWire Relay JWT for WebRTC
+      responses:
+        '200':
+          description: Relay JWT
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  projectId:
+                    type: string
+                  spaceUrl:
+                    type: string
+                  resource:
+                    type: string
+                  transport:
+                    type: string
+
+  # ───────────────────────────────────────────────
+  # Calls
+  # ───────────────────────────────────────────────
+  /calls:
+    get:
+      tags: [Calls]
+      summary: List calls with optional filters
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [inbound, outbound]
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: agentId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Paginated call list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calls:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Call'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /calls/initiate:
+    post:
+      tags: [Calls]
+      summary: Initiate an outbound call
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toNumber]
+              properties:
+                toNumber:
+                  type: string
+                fromNumber:
+                  type: string
+                mode:
+                  type: string
+                  enum: [manual, preview, progressive, predictive, ai_outbound]
+                accountId:
+                  type: string
+                accountName:
+                  type: string
+                campaignId:
+                  type: string
+                contactId:
+                  type: string
+                reservationToken:
+                  type: string
+      responses:
+        '200':
+          description: Call initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  callId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                  fromNumber:
+                    type: string
+                  toNumber:
+                    type: string
+                  provider:
+                    type: string
+                  mode:
+                    type: string
+        '400':
+          description: Validation error or DNC blocked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /calls/browser-session:
+    post:
+      tags: [Calls]
+      summary: Create a browser-based call session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toNumber]
+              properties:
+                toNumber:
+                  type: string
+                fromNumber:
+                  type: string
+                accountId:
+                  type: string
+                accountName:
+                  type: string
+                campaignId:
+                  type: string
+                contactId:
+                  type: string
+                reservationToken:
+                  type: string
+      responses:
+        '200':
+          description: Browser session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  callId:
+                    type: string
+                    format: uuid
+                  sessionId:
+                    type: string
+                    format: uuid
+                  fromNumber:
+                    type: string
+                  toNumber:
+                    type: string
+
+  /calls/{id}/browser-status:
+    post:
+      tags: [Calls]
+      summary: Update browser call status from client
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                relayState:
+                  type: string
+                duration:
+                  type: integer
+                providerCallId:
+                  type: string
+      responses:
+        '200':
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  callId:
+                    type: string
+                  status:
+                    type: string
+
+  /calls/{id}:
+    get:
+      tags: [Calls]
+      summary: Get single call detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Call detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Call'
+        '404':
+          description: Call not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /calls/{id}/audit:
+    get:
+      tags: [Calls]
+      summary: Get call audit event timeline
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Audit timeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    type:
+                      type: string
+                    source:
+                      type: string
+                    status:
+                      type: string
+                      nullable: true
+                    createdAt:
+                      type: string
+                      format: date-time
+                    payload:
+                      type: object
+
+  /calls/{id}/disposition:
+    post:
+      tags: [Calls]
+      summary: Submit a disposition for a call
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dispositionId]
+              properties:
+                dispositionId:
+                  type: string
+                note:
+                  type: string
+                callbackAt:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Disposition saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Call'
+
+  /calls/{id}/transfer:
+    post:
+      tags: [Calls]
+      summary: Transfer an active call
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetNumber]
+              properties:
+                targetNumber:
+                  type: string
+                type:
+                  type: string
+                  enum: [blind, warm]
+      responses:
+        '200':
+          description: Transfer initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+
+  /calls/{id}/hangup:
+    post:
+      tags: [Calls]
+      summary: Hang up an active call
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Call ended
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /calls/outbound-numbers:
+    get:
+      tags: [Calls]
+      summary: List available outbound caller ID numbers
+      responses:
+        '200':
+          description: Outbound numbers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PhoneNumber'
+
+  /calls/audit/recent:
+    get:
+      tags: [Calls]
+      summary: Get recent audit events across all calls
+      responses:
+        '200':
+          description: Recent audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /calls/simulate/inbound:
+    post:
+      tags: [Calls]
+      summary: Simulate an inbound call (dev/test)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scenario:
+                  type: string
+                fromNumber:
+                  type: string
+                toNumber:
+                  type: string
+      responses:
+        '200':
+          description: Simulated call created
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /calls/inbound/attach:
+    post:
+      tags: [Calls]
+      summary: Attach an agent to an inbound call
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [callSid]
+              properties:
+                callSid:
+                  type: string
+                fromNumber:
+                  type: string
+                toNumber:
+                  type: string
+      responses:
+        '200':
+          description: Agent attached
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /calls/lookup/phone/{phoneNumber}:
+    get:
+      tags: [Calls]
+      summary: Look up CRM data for a phone number
+      parameters:
+        - name: phoneNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lookup result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  # ───────────────────────────────────────────────
+  # Campaigns
+  # ───────────────────────────────────────────────
+  /campaigns:
+    get:
+      tags: [Campaigns]
+      summary: List all campaigns (supervisor+)
+      responses:
+        '200':
+          description: Campaign list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Campaign'
+    post:
+      tags: [Campaigns]
+      summary: Create a new campaign (supervisor+)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                dialMode:
+                  type: string
+                  enum: [predictive, progressive, preview]
+                timezone:
+                  type: string
+                maxAttemptsPerLead:
+                  type: integer
+                abandonRateLimit:
+                  type: number
+                dialRatio:
+                  type: number
+                retryDelaySeconds:
+                  type: integer
+                maxConcurrentCalls:
+                  type: integer
+                aiTargetEnabled:
+                  type: boolean
+                aiTarget:
+                  type: string
+      responses:
+        '201':
+          description: Campaign created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+
+  /campaigns/{id}:
+    get:
+      tags: [Campaigns]
+      summary: Get campaign details (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Campaign with lists and counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          description: Campaign not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      tags: [Campaigns]
+      summary: Update a campaign (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                dialMode:
+                  type: string
+                  enum: [predictive, progressive, preview]
+                timezone:
+                  type: string
+                maxAttemptsPerLead:
+                  type: integer
+                abandonRateLimit:
+                  type: number
+                dialRatio:
+                  type: number
+                retryDelaySeconds:
+                  type: integer
+                maxConcurrentCalls:
+                  type: integer
+                aiTargetEnabled:
+                  type: boolean
+                aiTarget:
+                  type: string
+      responses:
+        '200':
+          description: Campaign updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+
+  /campaigns/{id}/start:
+    post:
+      tags: [Campaigns]
+      summary: Start a campaign (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Campaign started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+
+  /campaigns/{id}/pause:
+    post:
+      tags: [Campaigns]
+      summary: Pause a campaign (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Campaign paused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+
+  /campaigns/{id}/contacts:
+    get:
+      tags: [Campaigns]
+      summary: List contacts in a campaign (supervisor+, paginated)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: status
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated contacts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      contacts:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CampaignContact'
+
+  /campaigns/{id}/lists:
+    post:
+      tags: [Campaigns]
+      summary: Create a contact list in a campaign (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                sourceType:
+                  type: string
+                  enum: [upload, api, crm]
+      responses:
+        '201':
+          description: List created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignList'
+
+  /campaigns/{id}/lists/{listId}/import:
+    post:
+      tags: [Campaigns]
+      summary: Import contacts into a campaign list (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: listId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      firstName:
+                        type: string
+                      lastName:
+                        type: string
+                      phone:
+                        type: string
+                      email:
+                        type: string
+                      timezone:
+                        type: string
+                      priority:
+                        type: integer
+                csv:
+                  type: string
+                  description: Raw CSV text (alternative to rows)
+      responses:
+        '200':
+          description: Import results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+
+  /campaigns/{id}/import:
+    post:
+      tags: [Campaigns]
+      summary: Quick-import contacts with auto-created list (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                listName:
+                  type: string
+                rows:
+                  type: array
+                  items:
+                    type: object
+                csv:
+                  type: string
+      responses:
+        '201':
+          description: Import results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+
+  /campaigns/active/next-contact:
+    get:
+      tags: [Campaigns]
+      summary: Get next preview contact for the current agent
+      responses:
+        '200':
+          description: Next contact or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contact:
+                    $ref: '#/components/schemas/CampaignContact'
+                  campaign:
+                    $ref: '#/components/schemas/Campaign'
+                  reservationToken:
+                    type: string
+                  message:
+                    type: string
+
+  /campaigns/dialer/status:
+    get:
+      tags: [Campaigns]
+      summary: Get dialer status and campaign queue metrics (supervisor+)
+      responses:
+        '200':
+          description: Dialer status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worker:
+                    type: object
+                  campaigns:
+                    type: array
+                    items:
+                      type: object
+
+  /campaigns/dialer/run-now:
+    post:
+      tags: [Campaigns]
+      summary: Trigger an immediate dialer cycle (supervisor+)
+      responses:
+        '200':
+          description: Dialer run completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  stats:
+                    type: object
+                  worker:
+                    type: object
+
+  # ───────────────────────────────────────────────
+  # Voicemails
+  # ───────────────────────────────────────────────
+  /voicemails:
+    get:
+      tags: [Voicemails]
+      summary: List voicemails (agents see only their own)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 25
+        - name: unreadOnly
+          in: query
+          schema:
+            type: string
+            enum: ['true', 'false']
+      responses:
+        '200':
+          description: Paginated voicemails
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  voicemails:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Voicemail'
+                  total:
+                    type: integer
+                  unreadCount:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+
+  /voicemails/{id}/read:
+    patch:
+      tags: [Voicemails]
+      summary: Mark a voicemail as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Voicemail updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voicemail'
+        '404':
+          description: Voicemail not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /voicemails/{id}/assign:
+    patch:
+      tags: [Voicemails]
+      summary: Assign a voicemail to an agent (supervisor+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agentId]
+              properties:
+                agentId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Voicemail reassigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Voicemail'
+
+  # ───────────────────────────────────────────────
+  # Reports
+  # ───────────────────────────────────────────────
+  /reports/summary:
+    get:
+      tags: [Reports]
+      summary: Aggregate call stats for a date range (supervisor+)
+      parameters:
+        - name: startDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endDate
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Summary statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period:
+                    type: object
+                    properties:
+                      start:
+                        type: string
+                        format: date-time
+                      end:
+                        type: string
+                        format: date-time
+                  totalCalls:
+                    type: integer
+                  outbound:
+                    type: integer
+                  inbound:
+                    type: integer
+                  completed:
+                    type: integer
+                  noAnswer:
+                    type: integer
+                  busy:
+                    type: integer
+                  failed:
+                    type: integer
+                  voicemail:
+                    type: integer
+                  abandonedEvents:
+                    type: integer
+                  guardrailBlocks:
+                    type: integer
+                  answerRate:
+                    type: string
+                  abandonRate:
+                    type: string
+                  avgDuration:
+                    type: integer
+                  dispositions:
+                    type: array
+                    items:
+                      type: object
+
+  /reports/agents:
+    get:
+      tags: [Reports]
+      summary: Per-agent performance breakdown (supervisor+)
+      responses:
+        '200':
+          description: Agent stats list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    firstName:
+                      type: string
+                    lastName:
+                      type: string
+                    username:
+                      type: string
+                    status:
+                      type: string
+                    totalCalls:
+                      type: integer
+                    answeredCalls:
+                      type: integer
+                    answerRate:
+                      type: string
+                    avgDuration:
+                      type: integer
+
+  /reports/hourly:
+    get:
+      tags: [Reports]
+      summary: Call volume by hour for today (supervisor+)
+      responses:
+        '200':
+          description: Hourly breakdown
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    hour:
+                      type: integer
+                    total:
+                      type: integer
+                    inbound:
+                      type: integer
+                    outbound:
+                      type: integer
+                    answered:
+                      type: integer
+                    abandoned:
+                      type: integer
+                    blocked:
+                      type: integer
+
+  # ───────────────────────────────────────────────
+  # Admin
+  # ───────────────────────────────────────────────
+  /admin/agents:
+    get:
+      tags: [Admin]
+      summary: List all agents (admin)
+      responses:
+        '200':
+          description: Agent list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+
+  /admin/agents/{id}:
+    put:
+      tags: [Admin]
+      summary: Update an agent profile (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [agent, supervisor, admin]
+                extension:
+                  type: string
+      responses:
+        '200':
+          description: Agent updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    delete:
+      tags: [Admin]
+      summary: Delete an agent (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Agent deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/agents/{id}/reset-password:
+    post:
+      tags: [Admin]
+      summary: Reset an agent's password (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newPassword]
+              properties:
+                newPassword:
+                  type: string
+      responses:
+        '200':
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/phones:
+    get:
+      tags: [Admin]
+      summary: List all phone numbers (admin)
+      responses:
+        '200':
+          description: Phone number list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PhoneNumber'
+    post:
+      tags: [Admin]
+      summary: Add a phone number (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [number]
+              properties:
+                number:
+                  type: string
+                label:
+                  type: string
+                type:
+                  type: string
+                  enum: [local, toll-free, mobile]
+                assignedTo:
+                  type: string
+      responses:
+        '201':
+          description: Phone number created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneNumber'
+
+  /admin/phones/{id}:
+    delete:
+      tags: [Admin]
+      summary: Delete a phone number (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Phone deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/dnc:
+    get:
+      tags: [Admin]
+      summary: List DNC entries (admin, paginated)
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: DNC list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DNCEntry'
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+    post:
+      tags: [Admin]
+      summary: Add a phone number to the DNC list (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phoneNumber]
+              properties:
+                phoneNumber:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        '201':
+          description: DNC entry added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/dnc/{phoneNumber}:
+    delete:
+      tags: [Admin]
+      summary: Remove a phone number from the DNC list (admin)
+      parameters:
+        - name: phoneNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: DNC entry removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /admin/dnc/check/{phoneNumber}:
+    get:
+      tags: [Admin]
+      summary: Check if a phone number is on the DNC list
+      parameters:
+        - name: phoneNumber
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: DNC check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  phoneNumber:
+                    type: string
+                  isDNC:
+                    type: boolean
+
+  /admin/dnc/import:
+    post:
+      tags: [Admin]
+      summary: Bulk-import phone numbers to the DNC list (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [numbers]
+              properties:
+                numbers:
+                  type: array
+                  items:
+                    type: string
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: Import count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported:
+                    type: integer
+
+  /admin/queues:
+    get:
+      tags: [Admin]
+      summary: List queue configurations (admin)
+      responses:
+        '200':
+          description: Queue list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueueConfig'
+
+  /admin/queues/{id}:
+    put:
+      tags: [Admin]
+      summary: Update a queue configuration (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                holdTimeout:
+                  type: integer
+                overflowAction:
+                  type: string
+                  enum: [voicemail, virtual-agent, continue-hold]
+                holdMusicUrl:
+                  type: string
+                maxQueueSize:
+                  type: integer
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Queue updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueConfig'
+
+  /admin/dispositions:
+    get:
+      tags: [Admin]
+      summary: List active disposition codes
+      responses:
+        '200':
+          description: Disposition code list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DispositionCode'
+    post:
+      tags: [Admin]
+      summary: Create a disposition code (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, label]
+              properties:
+                code:
+                  type: string
+                label:
+                  type: string
+                category:
+                  type: string
+                  enum: [payment, promise, skip, general]
+      responses:
+        '201':
+          description: Disposition created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispositionCode'
+
+  /admin/api-keys:
+    get:
+      tags: [Admin]
+      summary: List API keys (admin)
+      responses:
+        '200':
+          description: API key list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/APIKey'
+    post:
+      tags: [Admin]
+      summary: Create an API key (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+      responses:
+        '201':
+          description: API key created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIKey'
+
+  /admin/webhooks:
+    get:
+      tags: [Admin]
+      summary: List webhook configurations (admin)
+      responses:
+        '200':
+          description: Webhook list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookConfig'
+    post:
+      tags: [Admin]
+      summary: Create a webhook configuration (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, secret, events]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                secret:
+                  type: string
+                events:
+                  type: string
+                  description: Comma-separated event names (e.g. call.answered,call.completed)
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookConfig'
+
+  # ───────────────────────────────────────────────
+  # System
+  # ───────────────────────────────────────────────
+  /system/readiness:
+    get:
+      tags: [System]
+      summary: System readiness check with provider and staffing details (supervisor+)
+      responses:
+        '200':
+          description: Readiness report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  environment:
+                    type: object
+                  providers:
+                    type: object
+                  staffing:
+                    type: object
+                  phoneNumbers:
+                    type: object
+                  queues:
+                    type: array
+                    items:
+                      type: object
+                  campaigns:
+                    type: array
+                    items:
+                      type: object
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+
+  # ───────────────────────────────────────────────
+  # Health (root server, not under /api)
+  # ───────────────────────────────────────────────
+  /health:
+    servers:
+      - url: /
+    get:
+      tags: [Health]
+      summary: Basic health check (no auth)
+      security: []
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok

@@ -5,6 +5,11 @@ import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import { dncService } from '../services/dnc';
 import { generateApiKey } from '../utils/jwt';
+import {
+    validate, updateAgentSchema, resetPasswordSchema, createPhoneSchema,
+    addDncSchema, bulkDncImportSchema, updateQueueSchema, createDispositionSchema,
+    createApiKeySchema, createWebhookSchema,
+} from '../lib/validation';
 
 const router = Router();
 const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
@@ -23,7 +28,7 @@ router.get('/agents', authenticate, requireRole('admin'), async (req: Request, r
 });
 
 // PUT /api/admin/agents/:id
-router.put('/agents/:id', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.put('/agents/:id', authenticate, requireRole('admin'), validate(updateAgentSchema), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
     const { firstName, lastName, email, role, extension } = req.body;
     const agent = await prisma.user.update({
@@ -41,13 +46,9 @@ router.delete('/agents/:id', authenticate, requireRole('admin'), async (req: Req
 });
 
 // POST /api/admin/agents/:id/reset-password
-router.post('/agents/:id/reset-password', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/agents/:id/reset-password', authenticate, requireRole('admin'), validate(resetPasswordSchema), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
     const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-        res.status(400).json({ error: 'Password must be at least 6 characters' });
-        return;
-    }
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await prisma.user.update({ where: { id: agentId }, data: { passwordHash } });
     res.json({ success: true });
@@ -61,7 +62,7 @@ router.get('/phones', authenticate, requireRole('admin'), async (req: Request, r
 });
 
 // POST /api/admin/phones
-router.post('/phones', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/phones', authenticate, requireRole('admin'), validate(createPhoneSchema), async (req: Request, res: Response): Promise<void> => {
     const { number, label, type, assignedTo } = req.body;
     const phone = await prisma.phoneNumber.create({ data: { number, label, type, assignedTo } });
     res.status(201).json(phone);
@@ -83,7 +84,7 @@ router.get('/dnc', authenticate, requireRole('admin'), async (req: Request, res:
 });
 
 // POST /api/admin/dnc
-router.post('/dnc', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/dnc', authenticate, requireRole('admin'), validate(addDncSchema), async (req: Request, res: Response): Promise<void> => {
     const { phoneNumber, reason } = req.body;
     await dncService.addToDNC(phoneNumber, reason, req.user!.username);
     res.status(201).json({ success: true });
@@ -104,12 +105,8 @@ router.get('/dnc/check/:phoneNumber', authenticate, async (req: Request, res: Re
 });
 
 // POST /api/admin/dnc/import
-router.post('/dnc/import', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/dnc/import', authenticate, requireRole('admin'), validate(bulkDncImportSchema), async (req: Request, res: Response): Promise<void> => {
     const { numbers, reason } = req.body;
-    if (!Array.isArray(numbers)) {
-        res.status(400).json({ error: 'numbers must be an array' });
-        return;
-    }
     const imported = await dncService.bulkImport(numbers, reason, req.user!.username);
     res.json({ imported });
 });
@@ -122,7 +119,7 @@ router.get('/queues', authenticate, requireRole('admin'), async (req: Request, r
 });
 
 // PUT /api/admin/queues/:id
-router.put('/queues/:id', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.put('/queues/:id', authenticate, requireRole('admin'), validate(updateQueueSchema), async (req: Request, res: Response): Promise<void> => {
     const queueId = paramValue(req.params.id);
     const { holdTimeout, overflowAction, holdMusicUrl, maxQueueSize, isActive } = req.body;
     const queue = await prisma.queueConfig.update({
@@ -143,7 +140,7 @@ router.get('/dispositions', authenticate, async (req: Request, res: Response): P
 });
 
 // POST /api/admin/dispositions
-router.post('/dispositions', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/dispositions', authenticate, requireRole('admin'), validate(createDispositionSchema), async (req: Request, res: Response): Promise<void> => {
     const { code, label, category } = req.body;
     const disposition = await prisma.dispositionCode.create({ data: { code, label, category } });
     res.status(201).json(disposition);
@@ -160,7 +157,7 @@ router.get('/api-keys', authenticate, requireRole('admin'), async (req: Request,
 });
 
 // POST /api/admin/api-keys
-router.post('/api-keys', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/api-keys', authenticate, requireRole('admin'), validate(createApiKeySchema), async (req: Request, res: Response): Promise<void> => {
     const { label } = req.body;
     const key = generateApiKey();
     const apiKey = await prisma.aPIKey.create({ data: { key, label: label || 'CRM Integration' } });
@@ -175,7 +172,7 @@ router.get('/webhooks', authenticate, requireRole('admin'), async (req: Request,
 });
 
 // POST /api/admin/webhooks
-router.post('/webhooks', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/webhooks', authenticate, requireRole('admin'), validate(createWebhookSchema), async (req: Request, res: Response): Promise<void> => {
     const { url, secret, events } = req.body;
     const webhook = await prisma.webhookConfig.create({ data: { url, secret, events } });
     res.status(201).json(webhook);
