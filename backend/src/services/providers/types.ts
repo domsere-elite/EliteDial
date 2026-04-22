@@ -16,6 +16,7 @@ export interface OutboundCallRequest {
     aiTransferTarget?: string;
     amdEnabled?: boolean;
     metadata?: Record<string, unknown>;
+    clientState?: Record<string, unknown>;
 }
 
 export interface OutboundCallResult {

@@ -183,7 +183,7 @@ export class PredictiveWorker {
             abandonRateLimit: campaign.abandonRateLimit || 0.03,
             recentCompletedAttempts,
             recentAbandonedAttempts,
-            predictiveOverdialEnabled: DIALER_MODE === 'mock',
+            predictiveOverdialEnabled: true,
         });
 
         if (controls.dispatchCapacity <= 0) {
@@ -356,54 +356,20 @@ export class PredictiveWorker {
         await campaignReservationService.failReservation(contact.id, nextStatus, new Date(Date.now() + retryDelayMs));
     }
 
-    private async reserveAvailableAgentId(): Promise<string | null> {
-        for (let i = 0; i < 5; i += 1) {
-            const candidate = await prisma.user.findFirst({
-                where: { role: { in: ['agent', 'supervisor', 'admin'] }, status: 'available' },
-                select: { id: true },
-                orderBy: { updatedAt: 'asc' },
-            });
-
-            if (!candidate) return null;
-
-            const claim = await prisma.user.updateMany({
-                where: { id: candidate.id, status: 'available' },
-                data: { status: 'on-call' },
-            });
-
-            if (claim.count === 1) return candidate.id;
-        }
-
-        return null;
-    }
-
     private async liveDial(campaign: CampaignWithCount, contact: ReservedWorkerContact) {
         const retryDelayMs = Math.max(30, campaign.retryDelaySeconds) * 1000;
-        const { number: fromNumber, didResult } = await phoneNumberService.resolveOutboundDID({
+        const { number: fromNumber } = await phoneNumberService.resolveOutboundDID({
             toNumber: contact.primaryPhone,
             campaignId: campaign.id,
             contactId: contact.id,
         });
-        let reservedAgentId: string | null = null;
 
         try {
-            reservedAgentId = await this.reserveAvailableAgentId();
-            if (!reservedAgentId) {
-                await campaignReservationService.releaseReservation(contact.id);
-                return;
-            }
-
             const claimedContact = await campaignReservationService.confirmDialReservation(contact.id, {
                 type: 'worker',
                 token: contact.reservationToken,
             });
-            if (!claimedContact) {
-                await prisma.user.updateMany({
-                    where: { id: reservedAgentId },
-                    data: { status: 'available' },
-                });
-                return;
-            }
+            if (!claimedContact) return;
 
             const { call } = await callSessionService.createUnifiedCall({
                 provider: providerRegistry.getPrimaryTelephonyProvider().name,
@@ -413,7 +379,6 @@ export class PredictiveWorker {
                 fromNumber,
                 toNumber: contact.primaryPhone,
                 status: 'initiated',
-                agentId: reservedAgentId,
                 accountId: contact.accountId,
                 campaignId: campaign.id,
                 contactId: contact.id,
@@ -436,13 +401,19 @@ export class PredictiveWorker {
             const result = await providerRegistry.getPrimaryTelephonyProvider().initiateOutboundCall({
                 fromNumber,
                 toNumber: contact.primaryPhone,
-                agentId: reservedAgentId || undefined,
                 callbackUrl,
-                aiTransferTarget: campaign.aiTargetEnabled ? (campaign.aiTarget || undefined) : undefined,
                 amdEnabled: config.amd.enabled,
                 metadata: {
                     campaignId: campaign.id,
                     contactId: contact.id,
+                    callId: call.id,
+                    attemptId: attempt.id,
+                },
+                clientState: {
+                    stage: 'predictive-pending',
+                    campaignId: campaign.id,
+                    contactId: contact.id,
+                    attemptId: attempt.id,
                     callId: call.id,
                 },
             });
@@ -467,11 +438,6 @@ export class PredictiveWorker {
                     maxedOut ? 'failed' : 'queued',
                     maxedOut ? null : new Date(Date.now() + retryDelayMs),
                 );
-
-                await prisma.user.updateMany({
-                    where: { id: reservedAgentId },
-                    data: { status: 'available' },
-                });
                 return;
             }
 
@@ -489,7 +455,7 @@ export class PredictiveWorker {
                 data: { status: 'ringing' },
             });
 
-            logger.info('Predictive live dial initiated', {
+            logger.info('Predictive live dial initiated (over-dial, no pre-reserve)', {
                 campaignId: campaign.id,
                 contactId: contact.id,
                 callId: call.id,
@@ -503,13 +469,6 @@ export class PredictiveWorker {
                 maxedOut ? 'failed' : 'queued',
                 maxedOut ? null : new Date(Date.now() + retryDelayMs),
             );
-
-            if (reservedAgentId) {
-                await prisma.user.updateMany({
-                    where: { id: reservedAgentId },
-                    data: { status: 'available' },
-                });
-            }
         }
     }
 }
