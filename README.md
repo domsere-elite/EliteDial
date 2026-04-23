@@ -79,7 +79,7 @@ The system runs in mock mode by default, so you can develop and demo without a l
 
 | Layer | Technology |
 |------------|-----------------------------------------------------|
-| Backend | Node.js, Express, TypeScript, Prisma, PostgreSQL (Neon) |
+| Backend | Node.js, Express, TypeScript, Prisma, PostgreSQL (Supabase) |
 | Frontend | Next.js 14, React 18, TypeScript, Recharts |
 | Telephony | SignalWire (Relay + Fabric), Retell AI |
 | Real-time | Socket.IO |
@@ -137,7 +137,7 @@ All variables are defined in `.env.example`. Key groups:
 
 | Variable | Description |
 |----------------|----------------------------------------------|
-| `DATABASE_URL` | Pooled PostgreSQL connection string (Neon) |
+| `DATABASE_URL` | Pooled PostgreSQL connection string (Supabase) |
 | `DIRECT_URL` | Direct connection string for Prisma Migrate |
 
 ### SignalWire

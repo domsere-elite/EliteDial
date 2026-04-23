@@ -40,7 +40,7 @@ EliteDial is a **well-architected collections dialer** with strong fundamentals.
 |---|------|----------|--------|
 | 1.1 | **SignalWire Live Configuration** — Provision project, buy DIDs, configure webhooks, test outbound/inbound | P0 | 1 day |
 | 1.2 | **Environment & Secrets** — Production .env, secure JWT_SECRET, database connection pooling | P0 | 0.5 day |
-| 1.3 | **Database Migration** — Run `prisma db push` on production Neon instance, verify schema | P0 | 0.5 day |
+| 1.3 | **Database Migration** — Run `prisma db push` on production Supabase instance, verify schema | P0 | 0.5 day |
 | 1.4 | **Seed Production Data** — Disposition codes, admin user, phone numbers | P0 | 0.5 day |
 | 1.5 | **Softphone Testing** — Verify browser-to-PSTN calling works end-to-end | P0 | 1 day |
 | 1.6 | **Inbound Call Routing** — Test IVR + agent connect flow on live SignalWire | P0 | 1 day |
@@ -100,7 +100,7 @@ EliteDial is a **well-architected collections dialer** with strong fundamentals.
 | 4.4 | **Frontend E2E Tests** — Login flow, dial, disposition, campaign create | P2 | 2 days |
 | 4.5 | **Error Monitoring** — Sentry or equivalent for backend + frontend | P1 | 0.5 day |
 | 4.6 | **Health Check & Uptime** — `/api/system/health` endpoint + external monitor | P1 | 0.5 day |
-| 4.7 | **Database Backup** — Automated Neon snapshots + point-in-time recovery | P1 | 0.5 day |
+| 4.7 | **Database Backup** — Automated Supabase snapshots + point-in-time recovery | P1 | 0.5 day |
 | 4.8 | **CI/CD Pipeline** — GitHub Actions: lint, test, build, deploy on merge | P1 | 1 day |
 
 **Phase 4 Total: ~8.5 days**
@@ -144,7 +144,7 @@ EliteDial is a **well-architected collections dialer** with strong fundamentals.
               ┌────────┘   │   └────────┐
               ▼            ▼            ▼
         ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │ Neon     │ │SignalWire│ │ Retell   │
+        │ Supabase │ │SignalWire│ │ Retell   │
         │ Postgres │ │Telephony│ │ AI Agent │
         └──────────┘ └──────────┘ └──────────┘
 ```
