@@ -5,6 +5,8 @@ import { requireMinRole } from '../middleware/roles';
 import { predictiveWorker } from '../services/predictive-worker';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { computeDialerGuardrails, DIALER_STATS_WINDOW_MINUTES } from '../services/dialer-guardrails';
+import { complianceFrequency } from '../services/compliance-frequency';
+import { classifyImportCandidates } from '../services/campaign-import';
 import { config } from '../config';
 import { validate, createCampaignSchema, updateCampaignSchema, createCampaignListSchema, importContactsSchema } from '../lib/validation';
 
@@ -69,10 +71,8 @@ const toNumber = (value: unknown, fallback: number): number => {
 
 const importContacts = async (campaignId: string, listId: string, rows: ImportRow[]) => {
     let totalRecords = rows.length;
-    let validRecords = 0;
     let invalidRecords = 0;
-    let duplicateSuppressed = 0;
-    let dncSuppressed = 0;
+    let intraBatchDuplicates = 0;
 
     const seen = new Set<string>();
     const prepared: Array<ImportRow & { normalizedPhone: string }> = [];
@@ -85,7 +85,7 @@ const importContacts = async (campaignId: string, listId: string, rows: ImportRo
         }
 
         if (seen.has(phone)) {
-            duplicateSuppressed += 1;
+            intraBatchDuplicates += 1;
             continue;
         }
 
@@ -95,7 +95,7 @@ const importContacts = async (campaignId: string, listId: string, rows: ImportRo
 
     const candidatePhones = prepared.map((r) => r.normalizedPhone);
 
-    const [existingContacts, dncEntries] = await Promise.all([
+    const [existingContacts, dncEntries, regFBlockedPhones] = await Promise.all([
         prisma.campaignContact.findMany({
             where: { campaignId, primaryPhone: { in: candidatePhones } },
             select: { primaryPhone: true },
@@ -104,56 +104,38 @@ const importContacts = async (campaignId: string, listId: string, rows: ImportRo
             where: { phoneNumber: { in: candidatePhones } },
             select: { phoneNumber: true },
         }),
+        complianceFrequency.filterBlockedPhones(candidatePhones),
     ]);
 
-    const existingSet = new Set(existingContacts.map((x) => x.primaryPhone));
-    const dncSet = new Set(dncEntries.map((x) => x.phoneNumber));
+    const classified = classifyImportCandidates(prepared, {
+        existingPhones: new Set(existingContacts.map((x) => x.primaryPhone)),
+        dncPhones: new Set(dncEntries.map((x) => x.phoneNumber)),
+        regFBlockedPhones,
+    });
 
-    const toCreate = [] as Array<{
-        campaignId: string;
-        listId: string;
-        externalId?: string;
-        accountId?: string;
-        firstName?: string;
-        lastName?: string;
-        primaryPhone: string;
-        email?: string;
-        timezone?: string;
-        priority: number;
-        status: string;
-    }>;
+    const duplicateSuppressed = intraBatchDuplicates + classified.duplicateSuppressed;
+    const dncSuppressed = classified.dncSuppressed;
+    const regFSuppressed = classified.regFSuppressed;
 
-    for (const row of prepared) {
-        if (existingSet.has(row.normalizedPhone)) {
-            duplicateSuppressed += 1;
-            continue;
-        }
-
-        if (dncSet.has(row.normalizedPhone)) {
-            dncSuppressed += 1;
-            continue;
-        }
-
-        toCreate.push({
-            campaignId,
-            listId,
-            externalId: row.externalId,
-            accountId: row.accountId,
-            firstName: row.firstName,
-            lastName: row.lastName,
-            primaryPhone: row.normalizedPhone,
-            email: row.email,
-            timezone: row.timezone,
-            priority: typeof row.priority === 'number' && !Number.isNaN(row.priority) ? row.priority : 5,
-            status: 'queued',
-        });
-    }
+    const toCreate = classified.toCreate.map((row) => ({
+        campaignId,
+        listId,
+        externalId: row.externalId,
+        accountId: row.accountId,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        primaryPhone: row.normalizedPhone,
+        email: row.email,
+        timezone: row.timezone,
+        priority: typeof row.priority === 'number' && !Number.isNaN(row.priority) ? row.priority : 5,
+        status: 'queued',
+    }));
 
     if (toCreate.length > 0) {
         await prisma.campaignContact.createMany({ data: toCreate });
     }
 
-    validRecords = toCreate.length;
+    const validRecords = toCreate.length;
 
     await prisma.campaignList.update({
         where: { id: listId },
@@ -173,6 +155,7 @@ const importContacts = async (campaignId: string, listId: string, rows: ImportRo
         invalidRecords,
         duplicateSuppressed,
         dncSuppressed,
+        regFSuppressed,
     };
 };
 
