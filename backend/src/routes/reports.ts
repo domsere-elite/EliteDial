@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { requireMinRole } from '../middleware/roles';
+import { buildComplianceCsv, CallExportRow } from '../services/compliance-export';
 
 const router = Router();
 
@@ -155,6 +156,47 @@ router.get('/hourly', authenticate, requireMinRole('supervisor'), async (req: Re
     });
 
     res.json(Object.entries(hourly).map(([hour, data]) => ({ hour: parseInt(hour), ...data })));
+});
+
+// GET /api/reports/compliance-export — audit-grade CSV of calls with compliance flags
+router.get('/compliance-export', authenticate, requireMinRole('admin'), async (req: Request, res: Response): Promise<void> => {
+    const { startDate, endDate } = req.query;
+    const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const end = endDate ? new Date(endDate as string) : new Date();
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        res.status(400).json({ error: 'invalid_date_range' });
+        return;
+    }
+
+    const calls = await prisma.call.findMany({
+        where: { createdAt: { gte: start, lte: end } },
+        select: {
+            id: true,
+            createdAt: true,
+            direction: true,
+            fromNumber: true,
+            toNumber: true,
+            duration: true,
+            status: true,
+            mode: true,
+            channel: true,
+            agentId: true,
+            accountId: true,
+            dispositionId: true,
+            dispositionNote: true,
+            fdcpaNotice: true,
+            dncChecked: true,
+            recordingUrl: true,
+        },
+        orderBy: { createdAt: 'asc' },
+    });
+
+    const csv = buildComplianceCsv(calls as CallExportRow[]);
+    const filename = `compliance-export_${start.toISOString().slice(0, 10)}_${end.toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
 });
 
 export default router;
