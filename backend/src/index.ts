@@ -26,6 +26,7 @@ import settingsRoutes from './routes/settings';
 import { predictiveWorker } from './services/predictive-worker';
 import { reservationCleanup } from './services/reservation-cleanup';
 import { crmRetryQueue } from './services/crm-retry-queue';
+import { computeHealth } from './services/health';
 import { correlationId } from './middleware/correlation';
 
 const app = express();
@@ -61,22 +62,23 @@ const authLimiter = rateLimit({
 
 // ─── Health check ────────────────────────────────
 app.get('/health', async (req, res) => {
-    let dbStatus = 'disconnected';
-    try {
-        await prisma.$queryRaw`SELECT 1`;
-        dbStatus = 'connected';
-    } catch {
-        dbStatus = 'error';
-    }
-
-    res.json({
-        status: dbStatus === 'connected' ? 'ok' : 'degraded',
-        timestamp: new Date().toISOString(),
-        db: dbStatus,
-        signalwire: config.isSignalWireConfigured,
-        retell: config.isRetellConfigured,
-        crm: config.isCrmConfigured,
+    const result = await computeHealth({
+        checkDb: async () => {
+            await prisma.$queryRaw`SELECT 1`;
+            return true;
+        },
+        providers: {
+            signalwire: config.isSignalWireConfigured,
+            retell: config.isRetellConfigured,
+            crm: config.isCrmConfigured,
+        },
     });
+    res.status(result.statusCode).json(result.body);
+});
+
+// ─── Liveness probe (process alive, no deps) ─────
+app.get('/live', (req, res) => {
+    res.status(200).json({ status: 'ok' });
 });
 
 // ─── Routes ──────────────────────────────────────
