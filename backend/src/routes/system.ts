@@ -92,11 +92,11 @@ router.get('/readiness', authenticate, requireMinRole('supervisor'), async (req:
                 subscriberProvisioningEnabled: config.signalwire.allowSubscriberProvisioning,
                 softphoneTransport: config.signalwire.softphoneTransport,
                 humanBrowserOutboundSupported: config.isSignalWireHumanBrowserOutboundSupported,
-                inboundWebhookUrl: `${backendBaseUrl}/sw/inbound`,
-                callStatusWebhookUrl: `${backendBaseUrl}/sw/call-status`,
-                recordingWebhookUrl: `${backendBaseUrl}/sw/recording-status`,
-                transcriptionWebhookUrl: `${backendBaseUrl}/sw/transcription`,
-                amdWebhookUrl: `${backendBaseUrl}/sw/amd-status`,
+                webhookUrls: {
+                    inbound: `${backendBaseUrl}/swml/inbound`,
+                    callStatus: `${backendBaseUrl}/signalwire/events/call-status`,
+                    recording: `${backendBaseUrl}/signalwire/events/recording`,
+                },
             },
             ai: {
                 selected: primaryAIProvider.name,

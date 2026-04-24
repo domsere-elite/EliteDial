@@ -131,7 +131,7 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
         return;
     }
 
-    if (isAiMode && primaryAIProvider.name !== 'mock-ai' && !(aiTarget || config.ai.transferTarget)) {
+    if (isAiMode && primaryAIProvider.name !== 'mock-ai' && !(aiTarget || process.env.AI_TRANSFER_TARGET)) {
         res.status(400).json({ error: 'aiTarget is required for ai mode or set AI_TRANSFER_TARGET env var' });
         return;
     }

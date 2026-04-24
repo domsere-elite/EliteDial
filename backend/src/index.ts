@@ -18,6 +18,8 @@ import reportRoutes from './routes/reports';
 import adminRoutes from './routes/admin';
 import systemRoutes from './routes/system';
 import retellWebhookRoutes from './routes/retell-webhooks';
+import swmlRoutes from './routes/swml';
+import signalwireEventsRoutes from './routes/signalwire-events';
 import integrationRoutes from './routes/integration';
 import campaignRoutes from './routes/campaigns';
 import aiAgentRoutes from './routes/ai-agents';
@@ -92,6 +94,8 @@ app.use('/api/ai-agents', aiAgentRoutes);
 app.use('/api/settings', settingsRoutes);
 
 app.use('/retell', retellWebhookRoutes);
+app.use('/swml', swmlRoutes);
+app.use('/signalwire/events', signalwireEventsRoutes);
 
 app.use('/api/integration', integrationRoutes);
 
