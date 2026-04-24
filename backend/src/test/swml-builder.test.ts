@@ -100,6 +100,7 @@ test('swml-builder: transferSwml connects to phone number target', () => {
     const doc = transferSwml({ to: '+15551234567', from: '+15559998888' });
     const main = doc.sections.main;
     const connect = main.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present');
     assert.equal(connect.connect.to, '+15551234567');
 });
 
@@ -107,6 +108,7 @@ test('swml-builder: transferSwml connects to SIP target when target is a SIP URI
     const doc = transferSwml({ to: 'sip:ai@elevenlabs.sip.signalwire.com', from: '+15559998888' });
     const main = doc.sections.main;
     const connect = main.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present');
     assert.equal(connect.connect.to, 'sip:ai@elevenlabs.sip.signalwire.com');
 });
 

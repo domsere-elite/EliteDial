@@ -4,7 +4,7 @@
 // SWML spec reference: https://developer.signalwire.com/swml/
 // Version pinned to 1.0.0 for the duration of this product; update deliberately.
 
-export type SwmlStep = Record<string, unknown>;
+export type SwmlStep = Record<string, any>;
 
 export interface SwmlDocument {
     version: '1.0.0';
