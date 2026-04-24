@@ -24,6 +24,24 @@
 4. Big-bang rewrite in worktree; `webhooks.ts` deleted in the final cleanup task
 5. Delete the stale `2026-04-15-predictive-dialer-ai-overflow.md` plan doc (superseded)
 6. AMD-AI-transfer removed; plain AMD not re-added in this migration
+7. **Dial-mode scope cut (2026-04-23):** Product scope reduced to three modes only — `MANUAL`, `PROGRESSIVE` (1 call per available agent), and `AI_AUTONOMOUS` (N concurrent calls with no agent, auto-bridge to Retell via SWML `connect` on answer). `PREVIEW` and `PREDICTIVE` are removed from product scope. This migration assumes **Phase 0 scope-cut is complete before Task 0 runs** (see Prerequisite below), so there is no predictive-worker / preview code calling into `signalwire.ts` at port time.
+
+---
+
+## Prerequisite — Phase 0 scope-cut (must run before Task 0)
+
+Before executing this plan, a separate scope-cut pass must land on `main`:
+- Delete `backend/src/services/predictive-worker.ts` and its test
+- Delete preview-mode routes/UI (`backend/src/routes/calls.ts` preview branches, `frontend/src/app/dashboard/calls` preview flows if present)
+- Delete AMD logic and abandon-rate guardrails (keep simple concurrent-limit guardrail for AI_AUTONOMOUS)
+- Update Prisma enum `DialMode` to `MANUAL | PROGRESSIVE | AI_AUTONOMOUS`; generate + apply migration
+- Update campaign seed + admin UI + campaign form mode-selector to the new enum
+- Remove tests that target deleted code
+- Build + remaining tests green; commit
+
+Rationale: porting deprecated LaML behavior for modes we are deleting is wasted work. After Phase 0, the SWML migration surface shrinks (no AMD on the predictive path, fewer call-state branches to handle).
+
+The new `AI_AUTONOMOUS` mode worker is **not** built in this plan — it is built after the migration in Phase 2, so its call origination already targets the new SWML `connect` flow.
 
 ---
 
