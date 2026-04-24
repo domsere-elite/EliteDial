@@ -23,7 +23,6 @@ import integrationRoutes from './routes/integration';
 import campaignRoutes from './routes/campaigns';
 import aiAgentRoutes from './routes/ai-agents';
 import settingsRoutes from './routes/settings';
-import { predictiveWorker } from './services/predictive-worker';
 import { reservationCleanup } from './services/reservation-cleanup';
 import { crmRetryQueue } from './services/crm-retry-queue';
 import { computeHealth } from './services/health';
@@ -112,7 +111,6 @@ server.listen(config.port, () => {
     logger.info(`EliteDial backend running on port ${config.port}`);
     logger.info(`SignalWire configured: ${config.isSignalWireConfigured}`);
     logger.info(`Retell configured: ${config.isRetellConfigured}`);
-    predictiveWorker.start();
     reservationCleanup.start();
     crmRetryQueue.start();
 });
@@ -120,7 +118,6 @@ server.listen(config.port, () => {
 // ─── Graceful shutdown ───────────────────────────
 const gracefulShutdown = async (signal: string) => {
     logger.info(`${signal} received — shutting down gracefully`);
-    predictiveWorker.stop();
     reservationCleanup.stop();
     crmRetryQueue.stop();
 

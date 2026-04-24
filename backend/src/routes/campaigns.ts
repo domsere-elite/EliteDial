@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { requireMinRole } from '../middleware/roles';
-import { predictiveWorker } from '../services/predictive-worker';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { computeDialerGuardrails, DIALER_STATS_WINDOW_MINUTES } from '../services/dialer-guardrails';
 import { complianceFrequency } from '../services/compliance-frequency';
@@ -231,7 +230,7 @@ router.get('/active/next-contact', authenticate, async (req: Request, res: Respo
 });
 
 router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const worker = predictiveWorker.getStatus();
+    const worker = { running: false, lastRunAt: null as Date | null, note: 'deprecated' };
 
     const activeCampaigns = await prisma.campaign.findMany({
         where: {
@@ -323,11 +322,6 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
     }));
 
     res.json({ worker, campaigns });
-});
-
-router.post('/dialer/run-now', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const stats = await predictiveWorker.runNow();
-    res.json({ ok: true, stats, worker: predictiveWorker.getStatus() });
 });
 
 router.get('/:id', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
