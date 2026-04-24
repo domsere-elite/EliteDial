@@ -131,7 +131,7 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
         return;
     }
 
-    if (isAiMode && primaryAIProvider.name !== 'mock-ai' && !(aiTarget || config.ai.transferTarget)) {
+    if (isAiMode && primaryAIProvider.name !== 'mock-ai' && !(aiTarget || process.env.AI_TRANSFER_TARGET)) {
         res.status(400).json({ error: 'aiTarget is required for ai mode or set AI_TRANSFER_TARGET env var' });
         return;
     }
@@ -749,7 +749,7 @@ router.post('/inbound/attach', authenticate, validate(inboundAttachSchema), asyn
     const { callSid, fromNumber, toNumber } = req.body;
 
     const existing = await prisma.call.findFirst({
-        where: { signalwireCallSid: callSid },
+        where: { signalwireCallId: callSid },
     });
 
     if (existing) {
@@ -872,7 +872,7 @@ router.post('/:id/hangup', authenticate, async (req: Request, res: Response): Pr
     await callAuditService.track({
         type: 'call.status',
         callId: call.id,
-        callSid: call.providerCallId || call.signalwireCallSid || undefined,
+        callSid: call.providerCallId || call.signalwireCallId || undefined,
         details: {
             status: nextStatus,
             source: 'agent.hangup',
@@ -893,7 +893,7 @@ router.post('/:id/hangup', authenticate, async (req: Request, res: Response): Pr
         call_id: call.id,
         call_session_id: null,
         provider: call.provider,
-        provider_call_id: call.providerCallId || call.signalwireCallSid || null,
+        provider_call_id: call.providerCallId || call.signalwireCallId || null,
         mode: call.mode,
         channel: call.channel,
         to_number: call.toNumber,
@@ -934,7 +934,7 @@ router.get('/:id/audit', authenticate, async (req: Request, res: Response): Prom
     const callId = paramValue(req.params.id);
     const call = await prisma.call.findUnique({
         where: { id: callId },
-        select: { id: true, agentId: true, signalwireCallSid: true, createdAt: true, completedAt: true, status: true },
+        select: { id: true, agentId: true, signalwireCallId: true, createdAt: true, completedAt: true, status: true },
     });
 
     if (!call) {
@@ -1006,7 +1006,7 @@ router.post('/:id/disposition', authenticate, validate(dispositionSchema), async
     await callAuditService.track({
         type: 'call.disposition',
         callId: call.id,
-        callSid: call.providerCallId || call.signalwireCallSid || undefined,
+        callSid: call.providerCallId || call.signalwireCallId || undefined,
         details: {
             dispositionId,
             agentId: req.user!.id,
@@ -1018,7 +1018,7 @@ router.post('/:id/disposition', authenticate, validate(dispositionSchema), async
     await callSessionService.syncCall(call.id);
     await crmAdapter.postDisposition({
         call_id: call.id,
-        provider_call_id: call.providerCallId || call.signalwireCallSid || null,
+        provider_call_id: call.providerCallId || call.signalwireCallId || null,
         account_id: call.accountId || null,
         disposition_id: dispositionId,
         note: note || null,
@@ -1034,12 +1034,12 @@ router.post('/:id/transfer', authenticate, validate(transferSchema), async (req:
     const { targetNumber, type } = req.body;
 
     const call = await prisma.call.findUnique({ where: { id: callId } });
-    if (!call || !(call.providerCallId || call.signalwireCallSid)) {
+    if (!call || !(call.providerCallId || call.signalwireCallId)) {
         res.status(404).json({ error: 'Call not found or missing provider ID' });
         return;
     }
 
-    const callProviderId = call.providerCallId || call.signalwireCallSid;
+    const callProviderId = call.providerCallId || call.signalwireCallId;
     const baseUrl = getBackendBaseUrl(req);
 
     try {

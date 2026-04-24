@@ -2,7 +2,6 @@ import {
     BrowserTokenResult,
     OutboundCallRequest,
     OutboundCallResult,
-    RedirectCallRequest,
     TelephonyProvider,
 } from './providers/types';
 import { mockCallLifecycleService } from './mock-call-lifecycle';
@@ -43,9 +42,6 @@ class MockTelephonyService implements TelephonyProvider {
         };
     }
 
-    async redirectLiveCall(_request: RedirectCallRequest): Promise<boolean> {
-        return true;
-    }
 }
 
 export const mockTelephonyService = new MockTelephonyService();

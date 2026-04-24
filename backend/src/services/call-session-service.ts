@@ -94,7 +94,7 @@ export class CallSessionService {
                     accountId: input.accountId,
                     accountName: input.accountName,
                     providerCallId: input.providerCallId,
-                    signalwireCallSid: input.provider === 'signalwire' ? (input.providerCallId || null) : null,
+                    signalwireCallId: input.provider === 'signalwire' ? (input.providerCallId || null) : null,
                     providerMetadata: toJsonInput(input.providerMetadata),
                     duration: input.duration || 0,
                     completedAt: input.completedAt || undefined,
@@ -154,7 +154,7 @@ export class CallSessionService {
             data: {
                 provider: params.provider,
                 providerCallId: params.providerCallId,
-                signalwireCallSid: params.provider === 'signalwire' ? (params.providerCallId || null) : undefined,
+                signalwireCallId: params.provider === 'signalwire' ? (params.providerCallId || null) : undefined,
                 providerMetadata: toJsonInput(params.providerMetadata),
             },
         });
@@ -229,7 +229,7 @@ export class CallSessionService {
                         accountName: session.accountName,
                         agentId: session.agentId,
                         providerCallId: session.providerCallId,
-                        signalwireCallSid: session.provider === 'signalwire' ? session.providerCallId : null,
+                        signalwireCallId: session.provider === 'signalwire' ? session.providerCallId : null,
                         providerMetadata: toJsonInput(input.providerMetadata === undefined ? session.providerMetadata : input.providerMetadata),
                         completedAt: completedAt || undefined,
                     },
@@ -381,7 +381,7 @@ export class CallSessionService {
         return {
             call: { connect: { id: call.id } },
             provider: overrides.provider || call.provider,
-            providerCallId: overrides.providerCallId ?? call.providerCallId ?? call.signalwireCallSid ?? undefined,
+            providerCallId: overrides.providerCallId ?? call.providerCallId ?? call.signalwireCallId ?? undefined,
             channel: overrides.channel || (call.channel as 'human' | 'ai'),
             mode: overrides.mode || (call.mode as CreateUnifiedCallInput['mode']),
             direction: call.direction,
@@ -405,7 +405,7 @@ export class CallSessionService {
     private buildSessionUpdate(call: Call, overrides: Partial<CreateUnifiedCallInput>): Prisma.CallSessionUpdateInput {
         return {
             provider: overrides.provider || call.provider,
-            providerCallId: overrides.providerCallId ?? call.providerCallId ?? call.signalwireCallSid ?? undefined,
+            providerCallId: overrides.providerCallId ?? call.providerCallId ?? call.signalwireCallId ?? undefined,
             channel: overrides.channel || (call.channel as 'human' | 'ai'),
             mode: overrides.mode || (call.mode as CreateUnifiedCallInput['mode']),
             direction: call.direction,

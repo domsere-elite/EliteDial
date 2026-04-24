@@ -25,17 +25,11 @@ export interface OutboundCallResult {
     raw?: Record<string, unknown>;
 }
 
-export interface RedirectCallRequest {
-    providerCallId: string;
-    callbackUrl: string;
-}
-
 export interface TelephonyProvider {
     readonly name: string;
     readonly isConfigured: boolean;
     generateBrowserToken?(agentId: string, agentName: string, agentEmail?: string, endpointReference?: string): Promise<BrowserTokenResult>;
     initiateOutboundCall(request: OutboundCallRequest): Promise<OutboundCallResult | null>;
-    redirectLiveCall?(request: RedirectCallRequest): Promise<boolean>;
 }
 
 export interface AICallRequest {

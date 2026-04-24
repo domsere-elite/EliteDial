@@ -92,11 +92,11 @@ router.get('/readiness', authenticate, requireMinRole('supervisor'), async (req:
                 subscriberProvisioningEnabled: config.signalwire.allowSubscriberProvisioning,
                 softphoneTransport: config.signalwire.softphoneTransport,
                 humanBrowserOutboundSupported: config.isSignalWireHumanBrowserOutboundSupported,
-                inboundWebhookUrl: `${backendBaseUrl}/sw/inbound`,
-                callStatusWebhookUrl: `${backendBaseUrl}/sw/call-status`,
-                recordingWebhookUrl: `${backendBaseUrl}/sw/recording-status`,
-                transcriptionWebhookUrl: `${backendBaseUrl}/sw/transcription`,
-                amdWebhookUrl: `${backendBaseUrl}/sw/amd-status`,
+                webhookUrls: {
+                    inbound: `${backendBaseUrl}/swml/inbound`,
+                    callStatus: `${backendBaseUrl}/signalwire/events/call-status`,
+                    recording: `${backendBaseUrl}/signalwire/events/recording`,
+                },
             },
             ai: {
                 selected: primaryAIProvider.name,
@@ -169,7 +169,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
             where: {
                 OR: [
                     { provider: 'signalwire' },
-                    { signalwireCallSid: { not: null } },
+                    { signalwireCallId: { not: null } },
                 ],
             },
             include: {
@@ -197,7 +197,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
             where: {
                 OR: [
                     { provider: 'signalwire' },
-                    { signalwireCallSid: { not: null } },
+                    { signalwireCallId: { not: null } },
                 ],
                 createdAt: { gte: since },
             },
@@ -227,7 +227,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
         })),
         recentCalls: recentCalls.map((call) => ({
             id: call.id,
-            providerCallId: call.providerCallId || call.signalwireCallSid,
+            providerCallId: call.providerCallId || call.signalwireCallId,
             direction: call.direction,
             status: call.status,
             mode: call.mode,

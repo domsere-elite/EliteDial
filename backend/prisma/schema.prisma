@@ -30,7 +30,7 @@ model User {
 
 model Call {
   id             String   @id @default(uuid())
-  provider       String   @default("signalwire") // signalwire | retell | telnyx | mock
+  provider       String   @default("signalwire") // signalwire | retell | mock
   channel        String   @default("human") // human | ai
   mode           String   @default("manual") // manual | preview | progressive | predictive | ai_outbound | inbound
   direction      String   // inbound | outbound
@@ -46,7 +46,7 @@ model Call {
   agentId        String?
   agent          User?    @relation(fields: [agentId], references: [id])
   providerCallId String?
-  signalwireCallSid String?
+  signalwireCallId String?
   providerMetadata Json?
   fdcpaNotice    Boolean  @default(false) // was FDCPA notice played
   dncChecked     Boolean  @default(false) // was DNC checked before dial

@@ -51,19 +51,6 @@ export const config = {
         recordingArchiveBaseUrl: process.env.RECORDING_ARCHIVE_BASE_URL || '',
         transcriptArchiveBaseUrl: process.env.TRANSCRIPT_ARCHIVE_BASE_URL || '',
     },
-    ai: {
-        transferTarget: process.env.AI_TRANSFER_TARGET || '',
-        transferEnabled: toBool(process.env.AI_TRANSFER_ENABLED, false),
-    },
-    amd: {
-        enabled: toBool(process.env.AMD_ENABLED, true),
-        mode: process.env.AMD_MODE || 'DetectMessageEnd',
-        timeoutMs: toInt(process.env.AMD_TIMEOUT_MS, 3500),
-        speechThresholdMs: toInt(process.env.AMD_SPEECH_THRESHOLD_MS, 1200),
-        speechEndThresholdMs: toInt(process.env.AMD_SPEECH_END_THRESHOLD_MS, 700),
-        silenceTimeoutMs: toInt(process.env.AMD_SILENCE_TIMEOUT_MS, 5000),
-        async: toBool(process.env.AMD_ASYNC, true),
-    },
     dialer: {
         mode: (process.env.DIALER_MODE || 'mock') as 'mock' | 'live',
         pollIntervalMs: toInt(process.env.DIALER_POLL_INTERVAL_MS, 5000),
@@ -73,9 +60,6 @@ export const config = {
     },
     get isSignalWireHumanBrowserOutboundSupported(): boolean {
         return ['sip-endpoint', 'relay-v2'].includes(this.signalwire.softphoneTransport);
-    },
-    get isAiTransferConfigured(): boolean {
-        return !!(this.ai.transferEnabled && this.ai.transferTarget);
     },
     get isRetellConfigured(): boolean {
         return !!(this.retell.apiKey && this.retell.defaultAgentId);
