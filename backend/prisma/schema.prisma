@@ -272,21 +272,16 @@ model Campaign {
   name               String
   description        String?
   status             String            @default("draft") // draft | active | paused | completed | archived
-  dialMode           String            @default("predictive") // predictive | progressive | preview
+  dialMode           String            @default("manual") // manual | progressive | ai_autonomous
   timezone           String            @default("America/Chicago")
   maxAttemptsPerLead Int               @default(6)
-  abandonRateLimit   Float             @default(0.03)
-  dialRatio          Float             @default(3.0)
   retryDelaySeconds  Int               @default(600)
-  maxConcurrentCalls Int               @default(0) // 0 means auto-calculate from agents * dialRatio
-  aiTargetEnabled        Boolean           @default(false)
-  aiTarget               String?           // Transfer number or SIP URI for AI agent
+  maxConcurrentCalls Int               @default(0)
   proximityMatchEnabled  Boolean           @default(true)
   autoRotateEnabled      Boolean           @default(true)
   maxCallsPerDIDPerDay   Int               @default(50)
   avoidRepeatDID         Boolean           @default(true)
   defaultDIDId           String?           // fallback DID if no proximity match
-  aiOverflowNumber       String?           // E.164 AI overflow number, null = use global SystemSetting
   createdById        String?
   createdBy          User?             @relation(fields: [createdById], references: [id])
   createdAt          DateTime          @default(now())

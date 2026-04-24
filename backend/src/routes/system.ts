@@ -35,7 +35,7 @@ router.get('/readiness', authenticate, requireMinRole('supervisor'), async (req:
         }),
         prisma.campaign.findMany({
             where: { status: 'active' },
-            select: { id: true, name: true, dialMode: true, aiTargetEnabled: true },
+            select: { id: true, name: true, dialMode: true },
             orderBy: { updatedAt: 'desc' },
         }),
     ]);
