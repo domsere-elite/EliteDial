@@ -110,32 +110,25 @@ export const inboundAttachSchema = z.object({
 });
 
 // ─── Campaign Schemas ────────────────────────────
+// ─── Campaign Schemas ────────────────────────────
 export const createCampaignSchema = z.object({
     name: z.string().min(1, 'Name is required').max(200),
     description: optionalString,
-    dialMode: z.enum(['manual', 'preview', 'progressive', 'predictive']).optional().default('predictive'),
+    dialMode: z.enum(['manual', 'progressive', 'ai_autonomous']).optional().default('manual'),
     timezone: z.string().optional().default('America/Chicago'),
     maxAttemptsPerLead: z.number().int().min(1).max(50).optional().default(6),
-    abandonRateLimit: z.number().min(0).max(1).optional().default(0.03),
-    dialRatio: z.number().min(0.5).max(20).optional().default(3),
     retryDelaySeconds: z.number().int().min(30).optional().default(600),
     maxConcurrentCalls: z.number().int().min(0).optional().default(0),
-    aiTargetEnabled: z.boolean().optional().default(false),
-    aiTarget: optionalString,
 });
 
 export const updateCampaignSchema = z.object({
     name: optionalString,
     description: optionalString,
-    dialMode: z.enum(['manual', 'preview', 'progressive', 'predictive']).optional(),
+    dialMode: z.enum(['manual', 'progressive', 'ai_autonomous']).optional(),
     timezone: z.string().optional(),
     maxAttemptsPerLead: z.number().int().min(1).max(50).optional(),
-    abandonRateLimit: z.number().min(0).max(1).optional(),
-    dialRatio: z.number().min(0.5).max(20).optional(),
     retryDelaySeconds: z.number().int().min(30).optional(),
     maxConcurrentCalls: z.number().int().min(0).optional(),
-    aiTargetEnabled: z.boolean().optional(),
-    aiTarget: optionalString,
 });
 
 export const createCampaignListSchema = z.object({

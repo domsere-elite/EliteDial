@@ -7,6 +7,7 @@ import {
     changePasswordSchema,
     initiateCallSchema,
     createCampaignSchema,
+    updateCampaignSchema,
     dispositionSchema,
     addDncSchema,
     bulkDncImportSchema,
@@ -141,30 +142,13 @@ test('initiateCallSchema: invalid mode fails', () => {
 test('createCampaignSchema: valid with defaults', () => {
     const result = createCampaignSchema.safeParse({ name: 'Test Campaign' });
     assert.ok(result.success);
-    assert.equal(result.data!.dialMode, 'predictive');
+    assert.equal(result.data!.dialMode, 'manual');
     assert.equal(result.data!.timezone, 'America/Chicago');
-    assert.equal(result.data!.dialRatio, 3);
     assert.equal(result.data!.maxAttemptsPerLead, 6);
 });
 
 test('createCampaignSchema: name required', () => {
     const result = createCampaignSchema.safeParse({});
-    assert.equal(result.success, false);
-});
-
-test('createCampaignSchema: dialRatio below min fails', () => {
-    const result = createCampaignSchema.safeParse({
-        name: 'Test',
-        dialRatio: 0.1,
-    });
-    assert.equal(result.success, false);
-});
-
-test('createCampaignSchema: dialRatio above max fails', () => {
-    const result = createCampaignSchema.safeParse({
-        name: 'Test',
-        dialRatio: 25,
-    });
     assert.equal(result.success, false);
 });
 
@@ -245,4 +229,33 @@ test('blacklistToken adds token and isTokenBlacklisted returns true', () => {
 
 test('isTokenBlacklisted returns false for non-blacklisted token', () => {
     assert.equal(isTokenBlacklisted('never-added-token'), false);
+});
+
+// ─── Phase 0: new dialMode enum ───
+
+test('createCampaignSchema: default dialMode is manual', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Default Mode Campaign' });
+    assert.ok(result.success);
+    assert.equal(result.data!.dialMode, 'manual');
+});
+
+test('createCampaignSchema: ai_autonomous is accepted', () => {
+    const result = createCampaignSchema.safeParse({ name: 'AI Campaign', dialMode: 'ai_autonomous' });
+    assert.ok(result.success);
+    assert.equal(result.data!.dialMode, 'ai_autonomous');
+});
+
+test('createCampaignSchema: predictive is rejected', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Old Campaign', dialMode: 'predictive' });
+    assert.equal(result.success, false);
+});
+
+test('createCampaignSchema: preview is rejected', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Old Campaign', dialMode: 'preview' });
+    assert.equal(result.success, false);
+});
+
+test('updateCampaignSchema: predictive is rejected', () => {
+    const result = updateCampaignSchema.safeParse({ dialMode: 'predictive' });
+    assert.equal(result.success, false);
 });
