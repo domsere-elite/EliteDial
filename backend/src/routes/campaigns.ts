@@ -3,10 +3,9 @@ import { prisma } from '../lib/prisma';
 import { authenticate } from '../middleware/auth';
 import { requireMinRole } from '../middleware/roles';
 import { campaignReservationService } from '../services/campaign-reservation-service';
-import { computeDialerGuardrails, DIALER_STATS_WINDOW_MINUTES } from '../services/dialer-guardrails';
+import { computeDialerGuardrails } from '../services/dialer-guardrails';
 import { complianceFrequency } from '../services/compliance-frequency';
 import { classifyImportCandidates } from '../services/campaign-import';
-import { config } from '../config';
 import { validate, createCampaignSchema, updateCampaignSchema, createCampaignListSchema, importContactsSchema } from '../lib/validation';
 
 const router = Router();
@@ -176,13 +175,8 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
         dialMode,
         timezone,
         maxAttemptsPerLead,
-        abandonRateLimit,
-        dialRatio,
         retryDelaySeconds,
         maxConcurrentCalls,
-        aiTargetEnabled,
-        aiTarget,
-        aiOverflowNumber,
     } = req.body;
 
     const campaign = await prisma.campaign.create({
@@ -192,13 +186,8 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
             dialMode,
             timezone,
             maxAttemptsPerLead,
-            abandonRateLimit,
-            dialRatio: Math.max(0.5, toNumber(dialRatio, 3)),
             retryDelaySeconds: Math.max(30, Math.round(toNumber(retryDelaySeconds, 600))),
             maxConcurrentCalls: Math.max(0, Math.round(toNumber(maxConcurrentCalls, 0))),
-            aiTargetEnabled: aiTargetEnabled || false,
-            aiTarget,
-            aiOverflowNumber: aiOverflowNumber || null,
             createdById: req.user?.id,
         },
     });
@@ -210,7 +199,7 @@ router.get('/active/next-contact', authenticate, async (req: Request, res: Respo
     const campaign = await prisma.campaign.findFirst({
         where: {
             status: 'active',
-            dialMode: { in: ['preview', 'progressive'] },
+            dialMode: 'progressive',
         },
         orderBy: { updatedAt: 'desc' }
     });
@@ -230,20 +219,24 @@ router.get('/active/next-contact', authenticate, async (req: Request, res: Respo
 });
 
 router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const worker = { running: false, lastRunAt: null as Date | null, note: 'deprecated' };
+    // Placeholder until the Phase 2 AI Autonomous worker ships; shape matches
+    // the former predictiveWorker.getStatus() so the admin dashboard still renders.
+    const worker: { running: boolean; lastRunAt: Date | null; note: string } = {
+        running: false,
+        lastRunAt: null,
+        note: 'pending-phase-2',
+    };
 
     const activeCampaigns = await prisma.campaign.findMany({
         where: {
             status: 'active',
-            dialMode: { in: ['predictive', 'progressive'] },
+            dialMode: { in: ['progressive', 'ai_autonomous'] },
         },
         select: {
             id: true,
             name: true,
             dialMode: true,
             status: true,
-            abandonRateLimit: true,
-            dialRatio: true,
             retryDelaySeconds: true,
             maxConcurrentCalls: true,
             _count: { select: { contacts: true, attempts: true } },
@@ -252,8 +245,7 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
     });
 
     const campaigns = await Promise.all(activeCampaigns.map(async (campaign) => {
-        const statsWindowStart = new Date(Date.now() - DIALER_STATS_WINDOW_MINUTES * 60 * 1000);
-        const [queued, dialing, completed, failed, activeAttempts, availableAgents, recentCompletedAttempts, recentAbandonedAttempts] = await Promise.all([
+        const [queued, dialing, completed, failed, activeAttempts, availableAgents] = await Promise.all([
             prisma.campaignContact.count({ where: { campaignId: campaign.id, status: 'queued' } }),
             prisma.campaignContact.count({ where: { campaignId: campaign.id, status: 'dialing' } }),
             prisma.campaignContact.count({ where: { campaignId: campaign.id, status: 'completed' } }),
@@ -266,31 +258,13 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
                 },
             }),
             prisma.user.count({ where: { role: { in: ['agent', 'supervisor', 'admin'] }, status: 'available' } }),
-            prisma.campaignAttempt.count({
-                where: {
-                    campaignId: campaign.id,
-                    completedAt: { gte: statsWindowStart },
-                },
-            }),
-            prisma.campaignAttempt.count({
-                where: {
-                    campaignId: campaign.id,
-                    completedAt: { gte: statsWindowStart },
-                    outcome: 'abandoned',
-                },
-            }),
         ]);
 
         const controls = computeDialerGuardrails({
             dialMode: campaign.dialMode,
-            dialRatio: campaign.dialRatio,
             maxConcurrentCalls: campaign.maxConcurrentCalls,
             availableAgents,
             activeCalls: activeAttempts,
-            abandonRateLimit: campaign.abandonRateLimit,
-            recentCompletedAttempts,
-            recentAbandonedAttempts,
-            predictiveOverdialEnabled: config.dialer.mode === 'mock',
         });
 
         return {
@@ -298,8 +272,6 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
             name: campaign.name,
             dialMode: campaign.dialMode,
             status: campaign.status,
-            abandonRateLimit: campaign.abandonRateLimit,
-            dialRatio: campaign.dialRatio,
             retryDelaySeconds: campaign.retryDelaySeconds,
             maxConcurrentCalls: campaign.maxConcurrentCalls,
             totals: campaign._count,
@@ -314,8 +286,6 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
             effectiveConcurrentLimit: controls.effectiveConcurrentLimit,
             dispatchCapacity: controls.dispatchCapacity,
             queuePressure: controls.queuePressure,
-            recentAbandonRate: controls.recentAbandonRate,
-            recentCompletedAttempts: controls.recentCompletedAttempts,
             blockedReasons: controls.blockedReasons,
             warnings: controls.warnings,
         };
@@ -359,13 +329,8 @@ router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(update
             dialMode: req.body.dialMode,
             timezone: req.body.timezone,
             maxAttemptsPerLead: req.body.maxAttemptsPerLead,
-            abandonRateLimit: req.body.abandonRateLimit,
-            dialRatio: req.body.dialRatio === undefined ? undefined : Math.max(0.5, toNumber(req.body.dialRatio, 3)),
             retryDelaySeconds: req.body.retryDelaySeconds === undefined ? undefined : Math.max(30, Math.round(toNumber(req.body.retryDelaySeconds, 600))),
             maxConcurrentCalls: req.body.maxConcurrentCalls === undefined ? undefined : Math.max(0, Math.round(toNumber(req.body.maxConcurrentCalls, 0))),
-            aiTargetEnabled: req.body.aiTargetEnabled,
-            aiTarget: req.body.aiTarget,
-            aiOverflowNumber: req.body.aiOverflowNumber === undefined ? undefined : (req.body.aiOverflowNumber || null),
         },
     });
 
