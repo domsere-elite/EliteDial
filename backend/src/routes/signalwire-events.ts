@@ -63,14 +63,14 @@ async function defaultAuditTrack(params: Parameters<typeof callAuditService.trac
 
 async function defaultPrismaUpdateCall(callId: string, data: Record<string, unknown>) {
     await prisma.call.updateMany({
-        where: { signalwireCallSid: callId },  // ⚠️ DEVIATION 2: old column name
+        where: { signalwireCallId: callId },
         data,
     });
 }
 
 async function defaultFindCallWithAttempt(callId: string) {
     return prisma.call.findFirst({
-        where: { signalwireCallSid: callId },  // ⚠️ DEVIATION 2
+        where: { signalwireCallId: callId },
         select: {
             id: true,
             agentId: true,
@@ -97,7 +97,7 @@ async function defaultFindCallWithAttempt(callId: string) {
 
 async function defaultFindCompletedCall(callId: string) {
     return prisma.call.findFirst({
-        where: { signalwireCallSid: callId },  // ⚠️ DEVIATION 2
+        where: { signalwireCallId: callId },
         select: { agentId: true, id: true, accountId: true },
     });
 }

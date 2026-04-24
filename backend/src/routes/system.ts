@@ -169,7 +169,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
             where: {
                 OR: [
                     { provider: 'signalwire' },
-                    { signalwireCallSid: { not: null } },
+                    { signalwireCallId: { not: null } },
                 ],
             },
             include: {
@@ -197,7 +197,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
             where: {
                 OR: [
                     { provider: 'signalwire' },
-                    { signalwireCallSid: { not: null } },
+                    { signalwireCallId: { not: null } },
                 ],
                 createdAt: { gte: since },
             },
@@ -227,7 +227,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
         })),
         recentCalls: recentCalls.map((call) => ({
             id: call.id,
-            providerCallId: call.providerCallId || call.signalwireCallSid,
+            providerCallId: call.providerCallId || call.signalwireCallId,
             direction: call.direction,
             status: call.status,
             mode: call.mode,

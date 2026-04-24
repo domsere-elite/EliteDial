@@ -46,7 +46,7 @@ model Call {
   agentId        String?
   agent          User?    @relation(fields: [agentId], references: [id])
   providerCallId String?
-  signalwireCallSid String?
+  signalwireCallId String?
   providerMetadata Json?
   fdcpaNotice    Boolean  @default(false) // was FDCPA notice played
   dncChecked     Boolean  @default(false) // was DNC checked before dial

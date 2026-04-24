@@ -52,7 +52,7 @@ const defaultEnsureInboundCallRecord = async (params: {
     if (!callId) return null;
 
     const existing = await prisma.call.findFirst({
-        where: { signalwireCallSid: callId },
+        where: { signalwireCallId: callId },
         select: { id: true, agentId: true },
     });
 
