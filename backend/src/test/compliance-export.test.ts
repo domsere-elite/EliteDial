@@ -11,7 +11,7 @@ const row = (overrides: Partial<CallExportRow> = {}): CallExportRow => ({
     toNumber: '+14085559999',
     duration: 45,
     status: 'completed',
-    mode: 'predictive',
+    mode: 'progressive',
     channel: 'human',
     agentId: 'agent-42',
     accountId: 'acct-7',
