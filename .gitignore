@@ -33,6 +33,9 @@ Thumbs.db
 .claude/
 .mcp.json
 
+# Git worktrees
+.worktrees/
+
 # Prisma
 prisma/elitedial.db
 
