@@ -3,6 +3,7 @@
 import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import api from '@/lib/api';
+import { DIAL_MODE_OPTIONS, formatDialMode } from '@/lib/dialMode';
 
 type Campaign = {
     id: string;
@@ -50,7 +51,6 @@ type ImportResult = {
     dncSuppressed: number;
 };
 
-const modeLabels: Record<string, string> = { manual: 'Manual', progressive: 'Progressive', ai_autonomous: 'AI Autonomous' };
 const initials = (name: string) => name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'CM';
 
 export default function CampaignsPage() {
@@ -224,7 +224,7 @@ export default function CampaignsPage() {
                                     <tr>
                                         <th>Campaign Name</th>
                                         <th>Status</th>
-                                        <th>Dial Rate</th>
+                                        <th>Dial Mode</th>
                                         <th>Connected</th>
                                         <th>Manager</th>
                                         <th style={{ textAlign: 'right' }}>Actions</th>
@@ -240,7 +240,7 @@ export default function CampaignsPage() {
                                                     <div className="topline" style={{ fontSize: '0.72rem' }}>{campaign.description || `ID: #${campaign.id.slice(0, 6).toUpperCase()}`}</div>
                                                 </td>
                                                 <td><span className={`campaign-pill ${campaign.status}`}>{campaign.status.toUpperCase()}</span></td>
-                                                <td className="mono">{modeLabels[campaign.dialMode] || campaign.dialMode}</td>
+                                                <td className="mono">{formatDialMode(campaign.dialMode)}</td>
                                                 <td>
                                                     <div className="progress-pill"><span style={{ width: `${connectedPct}%` }} /></div>
                                                     <div className="topline" style={{ fontSize: '0.68rem', marginTop: 6 }}>{connectedPct}% of list</div>
@@ -309,7 +309,7 @@ export default function CampaignsPage() {
                                 <div key={campaign.id} className="precision-list-item">
                                     <div>
                                         <div style={{ fontWeight: 800 }}>{campaign.name}</div>
-                                        <div className="topline" style={{ fontSize: '0.68rem', marginTop: 4 }}>{campaign._count.contacts.toLocaleString()} contacts · {modeLabels[campaign.dialMode] || campaign.dialMode}</div>
+                                        <div className="topline" style={{ fontSize: '0.68rem', marginTop: 4 }}>{campaign._count.contacts.toLocaleString()} contacts · {formatDialMode(campaign.dialMode)}</div>
                                     </div>
                                     <span className={`campaign-pill ${campaign.status}`}>{campaign.status}</span>
                                 </div>
@@ -334,9 +334,9 @@ export default function CampaignsPage() {
                             <div>
                                 <label>Dial Mode</label>
                                 <select className="select" value={form.dialMode} onChange={(e) => setForm((current) => ({ ...current, dialMode: e.target.value }))}>
-                                    <option value="manual">Manual</option>
-                                    <option value="progressive">Progressive (1 per available agent)</option>
-                                    <option value="ai_autonomous">AI Autonomous (no agents, auto-bridge to AI)</option>
+                                    {DIAL_MODE_OPTIONS.map(opt => (
+                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                    ))}
                                 </select>
                             </div>
                         </div>

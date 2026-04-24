@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { DialMode, DIAL_MODE_OPTIONS } from '@/lib/dialMode';
 
 export interface CampaignFormValues {
     name: string;
     description: string;
-    dialMode: 'manual' | 'progressive' | 'ai_autonomous';
+    dialMode: DialMode;
     timezone: string;
     maxConcurrentCalls: number;
     maxAttemptsPerLead: number;
@@ -87,10 +88,10 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                         <div>
                             <label>Dial Mode</label>
-                            <select className="select" value={values.dialMode} onChange={e => set('dialMode', e.target.value as CampaignFormValues['dialMode'])}>
-                                <option value="manual">Manual</option>
-                                <option value="progressive">Progressive (1 per available agent)</option>
-                                <option value="ai_autonomous">AI Autonomous (no agents, auto-bridge to AI)</option>
+                            <select className="select" value={values.dialMode} onChange={e => set('dialMode', e.target.value as DialMode)}>
+                                {DIAL_MODE_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
                             </select>
                         </div>
                         <div>
@@ -106,19 +107,23 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                 </div>
             </div>
 
-            {/* CONCURRENCY */}
-            <div className="card">
-                <div className="section-label" style={{ marginBottom: 10 }}>Concurrency</div>
-                <div>
-                    <label>Max Concurrent Calls</label>
-                    <input type="number" className="input" min={0} value={values.maxConcurrentCalls}
-                           onChange={e => set('maxConcurrentCalls', parseInt(e.target.value, 10) || 0)} />
-                    <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                        For AI Autonomous: the number of concurrent outbound calls. For Progressive: caps agent-paced dialing (0 = use available agents).
+            {/* CONCURRENCY — only meaningful outside Manual mode */}
+            {values.dialMode !== 'manual' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>Concurrency</div>
+                    <div>
+                        <label>Max Concurrent Calls</label>
+                        <input type="number" className="input" min={0} value={values.maxConcurrentCalls}
+                               onChange={e => set('maxConcurrentCalls', parseInt(e.target.value, 10) || 0)} />
+                        <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                            {values.dialMode === 'ai_autonomous'
+                                ? 'Number of concurrent outbound AI calls.'
+                                : 'Caps agent-paced dialing (0 = use available agents).'}
+                        </div>
+                        {fieldErrors.maxConcurrentCalls && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.maxConcurrentCalls}</div>}
                     </div>
-                    {fieldErrors.maxConcurrentCalls && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.maxConcurrentCalls}</div>}
                 </div>
-            </div>
+            )}
 
             {/* RETRY */}
             <div className="card">

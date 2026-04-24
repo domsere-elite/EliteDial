@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { formatDialMode } from '@/lib/dialMode';
 
 interface Campaign {
     id: string;
@@ -11,15 +12,6 @@ interface Campaign {
     maxConcurrentCalls: number;
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
-}
-
-function formatDialMode(mode: string): string {
-    switch (mode) {
-        case 'manual': return 'Manual';
-        case 'progressive': return 'Progressive';
-        case 'ai_autonomous': return 'AI Autonomous';
-        default: return mode;
-    }
 }
 
 interface Props {
@@ -66,10 +58,12 @@ export function SettingsTab({ campaign }: Props) {
                 <Row label="Timezone" value={TIMEZONE_LABELS[campaign.timezone] || campaign.timezone} />
             </div>
 
-            <div className="card">
-                <div className="section-label" style={{ marginBottom: 10 }}>Concurrency</div>
-                <Row label="Max Concurrent Calls" value={campaign.maxConcurrentCalls === 0 ? 'Auto (use available agents)' : campaign.maxConcurrentCalls} />
-            </div>
+            {campaign.dialMode !== 'manual' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>Concurrency</div>
+                    <Row label="Max Concurrent Calls" value={campaign.maxConcurrentCalls === 0 ? 'Auto (use available agents)' : campaign.maxConcurrentCalls} />
+                </div>
+            )}
 
             <div className="card">
                 <div className="section-label" style={{ marginBottom: 10 }}>Retry Strategy</div>
