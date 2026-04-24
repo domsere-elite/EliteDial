@@ -10,7 +10,7 @@ const toJsonInput = (value: unknown): Prisma.InputJsonValue | Prisma.NullableJso
 type CreateUnifiedCallInput = {
     provider: string;
     channel: 'human' | 'ai';
-    mode: 'manual' | 'preview' | 'progressive' | 'predictive' | 'ai_outbound' | 'inbound';
+    mode: 'manual' | 'progressive' | 'ai_outbound' | 'inbound';
     direction: 'inbound' | 'outbound';
     fromNumber: string;
     toNumber: string;

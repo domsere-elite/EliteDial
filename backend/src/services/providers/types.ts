@@ -1,4 +1,4 @@
-export type HumanCallMode = 'manual' | 'preview' | 'progressive' | 'predictive' | 'inbound';
+export type HumanCallMode = 'manual' | 'progressive' | 'inbound';
 export type UnifiedCallMode = HumanCallMode | 'ai_outbound';
 export type UnifiedCallChannel = 'human' | 'ai';
 

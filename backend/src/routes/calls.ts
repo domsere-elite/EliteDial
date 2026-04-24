@@ -158,7 +158,7 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
 
     const callMode = isAiMode
         ? 'ai_outbound'
-        : (linkedContact ? 'preview' : 'manual');
+        : 'manual';
 
     // TCPA: Check calling window for campaign-linked contacts
     if (linkedContact) {
@@ -411,7 +411,7 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
         }
     }
 
-    const callMode = linkedContact ? 'preview' : 'manual';
+    const callMode = 'manual';
     const { call, session } = await callSessionService.createUnifiedCall({
         provider: 'signalwire',
         channel: 'human',
