@@ -1,32 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import api from '@/lib/api';
+import { useState } from 'react';
 
 export interface CampaignFormValues {
     name: string;
     description: string;
-    dialMode: 'predictive' | 'progressive' | 'preview';
+    dialMode: 'manual' | 'progressive' | 'ai_autonomous';
     timezone: string;
-    dialRatio: number;
     maxConcurrentCalls: number;
-    abandonRateLimit: number; // stored as decimal (0.03)
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
-    aiOverflowNumber: string; // empty string = use global default
 }
 
 const DEFAULT_VALUES: CampaignFormValues = {
     name: '',
     description: '',
-    dialMode: 'predictive',
+    dialMode: 'manual',
     timezone: 'America/Chicago',
-    dialRatio: 2.0,
     maxConcurrentCalls: 0,
-    abandonRateLimit: 0.03,
     maxAttemptsPerLead: 6,
     retryDelaySeconds: 600,
-    aiOverflowNumber: '',
 };
 
 const RETRY_PRESETS: Array<{ label: string; seconds: number }> = [
@@ -36,8 +29,6 @@ const RETRY_PRESETS: Array<{ label: string; seconds: number }> = [
     { label: '1 hour', seconds: 3600 },
     { label: '2 hours', seconds: 7200 },
 ];
-
-const E164_REGEX = /^\+[1-9]\d{1,14}$/;
 
 interface Props {
     initialValues?: Partial<CampaignFormValues>;
@@ -54,14 +45,7 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
         const s = initialValues?.retryDelaySeconds ?? DEFAULT_VALUES.retryDelaySeconds;
         return !RETRY_PRESETS.some(p => p.seconds === s);
     });
-    const [globalOverflow, setGlobalOverflow] = useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-
-    useEffect(() => {
-        api.get('/settings/ai-overflow-number/public')
-            .then(r => setGlobalOverflow(r.data?.value ?? null))
-            .catch(() => setGlobalOverflow(null));
-    }, []);
 
     const set = <K extends keyof CampaignFormValues>(key: K, value: CampaignFormValues[K]) => {
         setValues(prev => ({ ...prev, [key]: value }));
@@ -71,12 +55,8 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
     const validate = (): boolean => {
         const errs: Record<string, string> = {};
         if (!values.name.trim()) errs.name = 'Name is required';
-        if (values.dialRatio < 0.5 || values.dialRatio > 5.0) errs.dialRatio = 'Must be between 0.5 and 5.0';
-        if (values.abandonRateLimit < 0 || values.abandonRateLimit > 0.10) errs.abandonRateLimit = 'Must be between 0% and 10%';
         if (values.maxAttemptsPerLead < 1 || values.maxAttemptsPerLead > 20) errs.maxAttemptsPerLead = 'Must be between 1 and 20';
-        if (values.aiOverflowNumber && !E164_REGEX.test(values.aiOverflowNumber)) {
-            errs.aiOverflowNumber = 'Must be E.164 format (e.g. +12762128412)';
-        }
+        if (values.maxConcurrentCalls < 0) errs.maxConcurrentCalls = 'Cannot be negative';
         setFieldErrors(errs);
         return Object.keys(errs).length === 0;
     };
@@ -108,9 +88,9 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                         <div>
                             <label>Dial Mode</label>
                             <select className="select" value={values.dialMode} onChange={e => set('dialMode', e.target.value as CampaignFormValues['dialMode'])}>
-                                <option value="predictive">Predictive</option>
-                                <option value="progressive">Progressive</option>
-                                <option value="preview">Preview</option>
+                                <option value="manual">Manual</option>
+                                <option value="progressive">Progressive (1 per available agent)</option>
+                                <option value="ai_autonomous">AI Autonomous (no agents, auto-bridge to AI)</option>
                             </select>
                         </div>
                         <div>
@@ -126,31 +106,17 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                 </div>
             </div>
 
-            {/* PACING */}
+            {/* CONCURRENCY */}
             <div className="card">
-                <div className="section-label" style={{ marginBottom: 10 }}>Pacing &amp; Overdial</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                    <div>
-                        <label>Dial Ratio</label>
-                        <input type="number" className="input" step={0.1} min={0.5} max={5.0} value={values.dialRatio}
-                               onChange={e => set('dialRatio', parseFloat(e.target.value) || 0)} />
-                        <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>Lines per available agent</div>
-                        {fieldErrors.dialRatio && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.dialRatio}</div>}
+                <div className="section-label" style={{ marginBottom: 10 }}>Concurrency</div>
+                <div>
+                    <label>Max Concurrent Calls</label>
+                    <input type="number" className="input" min={0} value={values.maxConcurrentCalls}
+                           onChange={e => set('maxConcurrentCalls', parseInt(e.target.value, 10) || 0)} />
+                    <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                        For AI Autonomous: the number of concurrent outbound calls. For Progressive: caps agent-paced dialing (0 = use available agents).
                     </div>
-                    <div>
-                        <label>Max Concurrent</label>
-                        <input type="number" className="input" min={0} value={values.maxConcurrentCalls}
-                               onChange={e => set('maxConcurrentCalls', parseInt(e.target.value, 10) || 0)} />
-                        <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>0 = auto-calculate</div>
-                    </div>
-                    <div>
-                        <label>Abandon Rate Limit</label>
-                        <input type="number" className="input" step={0.5} min={0} max={10}
-                               value={(values.abandonRateLimit * 100).toFixed(1)}
-                               onChange={e => set('abandonRateLimit', (parseFloat(e.target.value) || 0) / 100)} />
-                        <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>Warning threshold only (%)</div>
-                        {fieldErrors.abandonRateLimit && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.abandonRateLimit}</div>}
-                    </div>
+                    {fieldErrors.maxConcurrentCalls && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.maxConcurrentCalls}</div>}
                 </div>
             </div>
 
@@ -186,20 +152,6 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                         )}
                     </div>
                 </div>
-            </div>
-
-            {/* AI OVERFLOW */}
-            <div className="card">
-                <div className="section-label" style={{ marginBottom: 10 }}>AI Overflow</div>
-                <label>AI Overflow Number (optional)</label>
-                <input type="text" className="input"
-                       value={values.aiOverflowNumber}
-                       onChange={e => set('aiOverflowNumber', e.target.value.trim())}
-                       placeholder={globalOverflow ? `Leave blank to use global default: ${globalOverflow}` : 'Leave blank to use global default'} />
-                <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                    When no agent is available, consumer is bridged to this AI agent.
-                </div>
-                {fieldErrors.aiOverflowNumber && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.aiOverflowNumber}</div>}
             </div>
 
             {/* ACTIONS */}

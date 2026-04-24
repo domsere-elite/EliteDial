@@ -21,11 +21,7 @@ export default function NewCampaignPage() {
         setSubmitting(true);
         setError(null);
         try {
-            const payload = {
-                ...values,
-                aiOverflowNumber: values.aiOverflowNumber || null,
-            };
-            const res = await api.post('/campaigns', payload);
+            const res = await api.post('/campaigns', values);
             router.push(`/dashboard/campaigns/${res.data.id}`);
         } catch (err: any) {
             setError(err.response?.data?.error || 'Failed to create campaign');

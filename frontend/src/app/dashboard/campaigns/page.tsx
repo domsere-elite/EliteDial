@@ -12,12 +12,8 @@ type Campaign = {
     status: string;
     timezone: string;
     maxAttemptsPerLead: number;
-    abandonRateLimit: number;
-    dialRatio: number;
     retryDelaySeconds: number;
     maxConcurrentCalls: number;
-    aiTargetEnabled: boolean;
-    aiTarget: string | null;
     createdAt: string;
     _count: { lists: number; contacts: number; attempts: number };
 };
@@ -54,7 +50,7 @@ type ImportResult = {
     dncSuppressed: number;
 };
 
-const modeLabels: Record<string, string> = { predictive: 'Predictive', progressive: 'Progressive', preview: 'Preview' };
+const modeLabels: Record<string, string> = { manual: 'Manual', progressive: 'Progressive', ai_autonomous: 'AI Autonomous' };
 const initials = (name: string) => name.split(/[\s_-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('') || 'CM';
 
 export default function CampaignsPage() {
@@ -75,15 +71,11 @@ export default function CampaignsPage() {
     const [form, setForm] = useState({
         name: '',
         description: '',
-        dialMode: 'predictive',
+        dialMode: 'manual',
         timezone: 'America/Chicago',
         maxAttemptsPerLead: 6,
-        abandonRateLimit: 0.03,
-        dialRatio: 3,
         retryDelaySeconds: 600,
         maxConcurrentCalls: 0,
-        aiTargetEnabled: false,
-        aiTarget: '',
     });
 
     const loadCampaigns = useCallback(async () => {
@@ -98,7 +90,7 @@ export default function CampaignsPage() {
 
     const openCreateModal = () => {
         setEditingId(null);
-        setForm({ name: '', description: '', dialMode: 'predictive', timezone: 'America/Chicago', maxAttemptsPerLead: 6, abandonRateLimit: 0.03, dialRatio: 3, retryDelaySeconds: 600, maxConcurrentCalls: 0, aiTargetEnabled: false, aiTarget: '' });
+        setForm({ name: '', description: '', dialMode: 'manual', timezone: 'America/Chicago', maxAttemptsPerLead: 6, retryDelaySeconds: 600, maxConcurrentCalls: 0 });
         setShowModal(true);
     };
 
@@ -110,12 +102,8 @@ export default function CampaignsPage() {
             dialMode: campaign.dialMode,
             timezone: campaign.timezone,
             maxAttemptsPerLead: campaign.maxAttemptsPerLead,
-            abandonRateLimit: campaign.abandonRateLimit,
-            dialRatio: campaign.dialRatio,
             retryDelaySeconds: campaign.retryDelaySeconds,
             maxConcurrentCalls: campaign.maxConcurrentCalls,
-            aiTargetEnabled: campaign.aiTargetEnabled,
-            aiTarget: campaign.aiTarget || '',
         });
         setShowModal(true);
     };
@@ -124,7 +112,7 @@ export default function CampaignsPage() {
         if (!form.name.trim()) return;
         setSaving(true);
         try {
-            const payload = { ...form, name: form.name.trim(), description: form.description.trim() || null, aiTarget: form.aiTarget || null };
+            const payload = { ...form, name: form.name.trim(), description: form.description.trim() || null };
             if (editingId) {
                 await api.patch(`/campaigns/${editingId}`, payload);
             } else {
@@ -252,7 +240,7 @@ export default function CampaignsPage() {
                                                     <div className="topline" style={{ fontSize: '0.72rem' }}>{campaign.description || `ID: #${campaign.id.slice(0, 6).toUpperCase()}`}</div>
                                                 </td>
                                                 <td><span className={`campaign-pill ${campaign.status}`}>{campaign.status.toUpperCase()}</span></td>
-                                                <td className="mono">{campaign.dialRatio.toFixed(1)}x</td>
+                                                <td className="mono">{modeLabels[campaign.dialMode] || campaign.dialMode}</td>
                                                 <td>
                                                     <div className="progress-pill"><span style={{ width: `${connectedPct}%` }} /></div>
                                                     <div className="topline" style={{ fontSize: '0.68rem', marginTop: 6 }}>{connectedPct}% of list</div>
@@ -260,7 +248,7 @@ export default function CampaignsPage() {
                                                 <td>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                                         <div className="precision-avatar" style={{ width: 30, height: 30, borderRadius: 10 }}>{initials(campaign.name)}</div>
-                                                        <span style={{ fontWeight: 700 }}>{campaign.aiTargetEnabled ? 'AI Routing' : 'Supervisor'}</span>
+                                                        <span style={{ fontWeight: 700 }}>{campaign.dialMode === 'ai_autonomous' ? 'AI Routing' : 'Agent'}</span>
                                                     </div>
                                                 </td>
                                                 <td onClick={(event) => event.stopPropagation()} style={{ textAlign: 'right' }}>
@@ -343,14 +331,13 @@ export default function CampaignsPage() {
                                 <div><label>Timezone</label><select className="select" value={form.timezone} onChange={(e) => setForm((current) => ({ ...current, timezone: e.target.value }))}><option value="America/New_York">Eastern</option><option value="America/Chicago">Central</option><option value="America/Denver">Mountain</option><option value="America/Los_Angeles">Pacific</option></select></div>
                                 <div><label>Max Attempts Per Lead</label><input className="input" type="number" value={form.maxAttemptsPerLead} onChange={(e) => setForm((current) => ({ ...current, maxAttemptsPerLead: parseInt(e.target.value) || 1 }))} /></div>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                    <input type="checkbox" checked={form.aiTargetEnabled} onChange={(e) => setForm((current) => ({ ...current, aiTargetEnabled: e.target.checked }))} />
-                                    <label style={{ margin: 0 }}>Enable AI Target</label>
-                                </div>
-                                {form.aiTargetEnabled && (
-                                    <div><label>AI Target</label><input className="input" value={form.aiTarget} onChange={(e) => setForm((current) => ({ ...current, aiTarget: e.target.value }))} placeholder="e.g. appointment-setter" /></div>
-                                )}
+                            <div>
+                                <label>Dial Mode</label>
+                                <select className="select" value={form.dialMode} onChange={(e) => setForm((current) => ({ ...current, dialMode: e.target.value }))}>
+                                    <option value="manual">Manual</option>
+                                    <option value="progressive">Progressive (1 per available agent)</option>
+                                    <option value="ai_autonomous">AI Autonomous (no agents, auto-bridge to AI)</option>
+                                </select>
                             </div>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>

@@ -5,7 +5,6 @@ import api from '@/lib/api';
 
 interface Campaign {
     id: string;
-    abandonRateLimit?: number;
     _count?: { contacts: number; attempts: number };
 }
 
@@ -23,9 +22,6 @@ interface DialerCampaignStatus {
     activeAttempts: number;
     dispatchCapacity: number;
     effectiveConcurrentLimit: number;
-    recentAbandonRate: number;
-    recentCompletedAttempts: number;
-    abandonRateLimit: number;
     warnings: string[];
     blockedReasons: string[];
 }
@@ -48,8 +44,8 @@ const OUTCOME_BADGE: Record<string, { className: string; label: string }> = {
 };
 
 const WARNING_COPY: Record<string, { tone: 'error' | 'warning' | 'info'; label: string }> = {
-    abandon_rate_exceeded: { tone: 'error', label: 'Abandon rate over limit' },
-    safe_predictive_cap: { tone: 'info', label: 'Over-dial disabled (config)' },
+    manual_mode: { tone: 'info', label: 'Manual mode — no auto-dispatch' },
+    no_concurrency_configured: { tone: 'warning', label: 'Set Max Concurrent Calls to start dialing' },
     no_available_agents: { tone: 'warning', label: 'No agents available — dispatch paused' },
     queue_backpressure: { tone: 'warning', label: 'Queue full — waiting on active calls' },
 };
@@ -93,13 +89,6 @@ export function OverviewTab({ campaign }: Props) {
     const contacted = attempts.filter(a => ['bridged-to-agent', 'bridged-to-ai', 'human', 'completed'].includes(a.outcome || '')).length;
     const contactRate = total > 0 ? `${Math.round((contacted / total) * 100)}%` : '—';
 
-    const abandonLimit = dialerStatus?.abandonRateLimit ?? campaign.abandonRateLimit ?? 0.03;
-    const liveAbandon = dialerStatus?.recentAbandonRate ?? 0;
-    const abandonSampleReady = (dialerStatus?.recentCompletedAttempts ?? 0) >= 5;
-    const abandonOverLimit = abandonSampleReady && liveAbandon >= abandonLimit;
-    const abandonPct = `${(liveAbandon * 100).toFixed(1)}%`;
-    const limitPct = `${(abandonLimit * 100).toFixed(1)}%`;
-
     const allSignals = [
         ...(dialerStatus?.blockedReasons || []),
         ...(dialerStatus?.warnings || []),
@@ -116,13 +105,9 @@ export function OverviewTab({ campaign }: Props) {
                             copy.tone === 'error' ? 'notice notice-error' :
                             copy.tone === 'warning' ? 'notice notice-warning' :
                             'notice notice-info';
-                        let detail = copy.label;
-                        if (code === 'abandon_rate_exceeded') {
-                            detail = `${copy.label} — ${abandonPct} (cap ${limitPct}) over last ${dialerStatus?.recentCompletedAttempts ?? 0} completed calls`;
-                        }
                         return (
                             <div key={code} className={cls}>
-                                <strong>⚠ {detail}</strong>
+                                <strong>⚠ {copy.label}</strong>
                             </div>
                         );
                     })}
@@ -166,17 +151,6 @@ export function OverviewTab({ campaign }: Props) {
                 <div className="stat-card">
                     <div className="stat-value" style={{ color: 'var(--status-green)' }}>{contactRate}</div>
                     <div className="stat-label">Contact Rate</div>
-                </div>
-                <div
-                    className={`stat-card ${abandonOverLimit ? 'pulse-red' : ''}`}
-                    style={abandonOverLimit ? { borderColor: 'var(--status-red-border)' } : undefined}
-                >
-                    <div className="stat-value" style={{ color: abandonOverLimit ? 'var(--status-red-text)' : undefined }}>
-                        {abandonSampleReady ? abandonPct : '—'}
-                    </div>
-                    <div className="stat-label">
-                        Abandon Rate <span style={{ color: 'var(--text-muted)' }}>/ cap {limitPct}</span>
-                    </div>
                 </div>
             </div>
 

@@ -28,12 +28,9 @@ export default function EditCampaignPage() {
                 description: c.description || '',
                 dialMode: c.dialMode,
                 timezone: c.timezone,
-                dialRatio: c.dialRatio,
                 maxConcurrentCalls: c.maxConcurrentCalls,
-                abandonRateLimit: c.abandonRateLimit,
                 maxAttemptsPerLead: c.maxAttemptsPerLead,
                 retryDelaySeconds: c.retryDelaySeconds,
-                aiOverflowNumber: c.aiOverflowNumber || '',
             });
         }).catch(() => {
             setError('Failed to load campaign');
@@ -51,11 +48,7 @@ export default function EditCampaignPage() {
         setSubmitting(true);
         setError(null);
         try {
-            const payload = {
-                ...values,
-                aiOverflowNumber: values.aiOverflowNumber || null,
-            };
-            await api.patch(`/campaigns/${id}`, payload);
+            await api.patch(`/campaigns/${id}`, values);
             router.push(`/dashboard/campaigns/${id}`);
         } catch (err: any) {
             setError(err.response?.data?.error || 'Failed to save campaign');

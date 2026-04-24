@@ -17,12 +17,9 @@ interface Campaign {
     description: string | null;
     dialMode: string;
     timezone: string;
-    dialRatio: number;
     maxConcurrentCalls: number;
-    abandonRateLimit: number;
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
-    aiOverflowNumber: string | null;
     status: string;
     _count?: { contacts: number; attempts: number };
 }
