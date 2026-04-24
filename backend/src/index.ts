@@ -17,7 +17,6 @@ import voicemailRoutes from './routes/voicemails';
 import reportRoutes from './routes/reports';
 import adminRoutes from './routes/admin';
 import systemRoutes from './routes/system';
-import webhookRoutes from './routes/webhooks';
 import retellWebhookRoutes from './routes/retell-webhooks';
 import integrationRoutes from './routes/integration';
 import campaignRoutes from './routes/campaigns';
@@ -92,7 +91,6 @@ app.use('/api/campaigns', campaignRoutes);
 app.use('/api/ai-agents', aiAgentRoutes);
 app.use('/api/settings', settingsRoutes);
 
-app.use('/sw', webhookRoutes);
 app.use('/retell', retellWebhookRoutes);
 
 app.use('/api/integration', integrationRoutes);
