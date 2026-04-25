@@ -207,16 +207,21 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
 
         if (mode === 'ai_autonomous') {
             const campaignId = (req.query.campaignId as string) || '';
-            const campaign = await deps.loadCampaignForBridge(campaignId);
-            if (!campaign || !campaign.retellSipAddress) {
-                logger.warn('swml.bridge ai_autonomous: campaign or retellSipAddress missing — returning hangup', { campaignId });
+            try {
+                const campaign = await deps.loadCampaignForBridge(campaignId);
+                if (!campaign || !campaign.retellSipAddress) {
+                    logger.warn('swml.bridge ai_autonomous: campaign or retellSipAddress missing — returning hangup', { campaignId });
+                    res.json(hangupSwml('AI agent not available.'));
+                    return;
+                }
+                res.json(bridgeOutboundAiSwml({
+                    retellSipAddress: campaign.retellSipAddress,
+                    from,
+                }));
+            } catch (err) {
+                logger.error('swml.bridge ai_autonomous: loadCampaignForBridge threw — returning hangup', { campaignId, err });
                 res.json(hangupSwml('AI agent not available.'));
-                return;
             }
-            res.json(bridgeOutboundAiSwml({
-                retellSipAddress: campaign.retellSipAddress,
-                from,
-            }));
             return;
         }
 
