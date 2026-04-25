@@ -133,6 +133,7 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
                 url: recordingUrl,
                 status: 'available',
                 metadata: payload,
+                updateCallRecordingUrl: false,
             });
             await crmAdapter.postRecordingTranscript({
                 call_id: callId,

@@ -1,6 +1,8 @@
 import { Call, Prisma } from '@prisma/client';
-import { prisma } from '../lib/prisma';
+import { prisma as defaultPrisma } from '../lib/prisma';
 import { logger } from '../utils/logger';
+
+type PrismaLike = typeof defaultPrisma;
 
 const toJsonInput = (value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput | undefined => {
     if (value === undefined || value === null) return undefined;
@@ -40,7 +42,7 @@ type UpdateProviderStatusInput = {
     providerMetadata?: unknown;
 };
 
-type RecordingInput = {
+export type RecordingInput = {
     provider: string;
     providerCallId?: string | null;
     callId?: string | null;
@@ -50,6 +52,9 @@ type RecordingInput = {
     status?: string;
     duration?: number | null;
     metadata?: unknown;
+    /** When true (default), updates Call.recordingUrl after creating the CallRecording row.
+     *  Set false on duplicate-source providers (e.g. Retell) where SignalWire is canonical. */
+    updateCallRecordingUrl?: boolean;
 };
 
 type TranscriptInput = {
@@ -77,10 +82,16 @@ type CallEventInput = {
 };
 
 export class CallSessionService {
+    private prisma: PrismaLike;
+
+    constructor(deps?: { prisma?: PrismaLike }) {
+        this.prisma = deps?.prisma || defaultPrisma;
+    }
+
     async createUnifiedCall(input: CreateUnifiedCallInput) {
         const status = input.status || 'initiated';
 
-        return prisma.$transaction(async (tx) => {
+        return this.prisma.$transaction(async (tx) => {
             const call = await tx.call.create({
                 data: {
                     provider: input.provider,
@@ -132,10 +143,10 @@ export class CallSessionService {
     }
 
     async syncCall(callId: string, overrides: Partial<CreateUnifiedCallInput> = {}) {
-        const call = await prisma.call.findUnique({ where: { id: callId } });
+        const call = await this.prisma.call.findUnique({ where: { id: callId } });
         if (!call) return null;
 
-        const session = await prisma.callSession.upsert({
+        const session = await this.prisma.callSession.upsert({
             where: { callId },
             create: this.buildSessionCreate(call, overrides),
             update: this.buildSessionUpdate(call, overrides),
@@ -149,7 +160,7 @@ export class CallSessionService {
         providerCallId?: string | null;
         providerMetadata?: unknown;
     }) {
-        const updatedCall = await prisma.call.update({
+        const updatedCall = await this.prisma.call.update({
             where: { id: callId },
             data: {
                 provider: params.provider,
@@ -159,7 +170,7 @@ export class CallSessionService {
             },
         });
 
-        const session = await prisma.callSession.upsert({
+        const session = await this.prisma.callSession.upsert({
             where: { callId },
             create: this.buildSessionCreate(updatedCall, {
                 provider: params.provider,
@@ -178,7 +189,7 @@ export class CallSessionService {
     }
 
     async findSessionByProviderCall(provider: string, providerCallId: string) {
-        return prisma.callSession.findUnique({
+        return this.prisma.callSession.findUnique({
             where: { provider_providerCallId: { provider, providerCallId } },
             include: { call: true },
         });
@@ -194,8 +205,8 @@ export class CallSessionService {
         const completedAt = input.completedAt || (['completed', 'failed', 'busy', 'no-answer', 'voicemail'].includes(input.status) ? new Date() : null);
         const answeredAt = input.answeredAt || (input.status === 'in-progress' ? new Date() : null);
 
-        const [updatedSession, updatedCall] = await prisma.$transaction([
-            prisma.callSession.update({
+        const [updatedSession, updatedCall] = await this.prisma.$transaction([
+            this.prisma.callSession.update({
                 where: { id: session.id },
                 data: {
                     status: input.status,
@@ -206,7 +217,7 @@ export class CallSessionService {
                 },
             }),
             session.callId
-                ? prisma.call.update({
+                ? this.prisma.call.update({
                     where: { id: session.callId },
                     data: {
                         status: input.status,
@@ -215,7 +226,7 @@ export class CallSessionService {
                         providerMetadata: toJsonInput(input.providerMetadata),
                     },
                 })
-                : prisma.call.create({
+                : this.prisma.call.create({
                     data: {
                         provider: session.provider,
                         channel: session.channel,
@@ -237,7 +248,7 @@ export class CallSessionService {
         ]);
 
         if (!session.callId) {
-            await prisma.callSession.update({
+            await this.prisma.callSession.update({
                 where: { id: session.id },
                 data: { callId: updatedCall.id },
             });
@@ -248,7 +259,7 @@ export class CallSessionService {
 
     async upsertEvent(input: CallEventInput) {
         try {
-            return await prisma.callEvent.create({
+            return await this.prisma.callEvent.create({
                 data: {
                     sessionId: input.sessionId,
                     callId: input.callId,
@@ -267,7 +278,7 @@ export class CallSessionService {
                 error instanceof Prisma.PrismaClientKnownRequestError &&
                 error.code === 'P2002'
             ) {
-                return prisma.callEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+                return this.prisma.callEvent.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
             }
             throw error;
         }
@@ -276,7 +287,7 @@ export class CallSessionService {
     async addRecording(input: RecordingInput) {
         const sessionId = await this.resolveSessionId(input.provider, input.providerCallId, input.callId);
         const existing = input.providerRecordingId
-            ? await prisma.callRecording.findFirst({
+            ? await this.prisma.callRecording.findFirst({
                 where: {
                     provider: input.provider,
                     providerRecordingId: input.providerRecordingId,
@@ -285,7 +296,7 @@ export class CallSessionService {
             : null;
 
         const recording = existing
-            ? await prisma.callRecording.update({
+            ? await this.prisma.callRecording.update({
                 where: { id: existing.id },
                 data: {
                     sessionId,
@@ -297,7 +308,7 @@ export class CallSessionService {
                     metadata: toJsonInput(input.metadata === undefined ? existing.metadata : input.metadata),
                 },
             })
-            : await prisma.callRecording.create({
+            : await this.prisma.callRecording.create({
                 data: {
                     sessionId,
                     callId: input.callId || undefined,
@@ -311,8 +322,9 @@ export class CallSessionService {
                 },
             });
 
-        if (input.callId) {
-            await prisma.call.update({
+        const shouldUpdateCallRecordingUrl = input.updateCallRecordingUrl !== false;
+        if (input.callId && shouldUpdateCallRecordingUrl) {
+            await this.prisma.call.update({
                 where: { id: input.callId },
                 data: { recordingUrl: input.url },
             });
@@ -324,7 +336,7 @@ export class CallSessionService {
     async addTranscript(input: TranscriptInput) {
         const sessionId = await this.resolveSessionId(input.provider, input.providerCallId, input.callId);
         const existing = input.providerTranscriptId
-            ? await prisma.callTranscript.findFirst({
+            ? await this.prisma.callTranscript.findFirst({
                 where: {
                     provider: input.provider,
                     providerTranscriptId: input.providerTranscriptId,
@@ -333,7 +345,7 @@ export class CallSessionService {
             : null;
 
         return existing
-            ? prisma.callTranscript.update({
+            ? this.prisma.callTranscript.update({
                 where: { id: existing.id },
                 data: {
                     sessionId,
@@ -345,7 +357,7 @@ export class CallSessionService {
                     metadata: toJsonInput(input.metadata === undefined ? existing.metadata : input.metadata),
                 },
             })
-            : prisma.callTranscript.create({
+            : this.prisma.callTranscript.create({
                 data: {
                     sessionId,
                     callId: input.callId || undefined,
@@ -362,12 +374,12 @@ export class CallSessionService {
 
     async resolveSessionId(provider: string, providerCallId?: string | null, callId?: string | null) {
         if (callId) {
-            const byCall = await prisma.callSession.findUnique({ where: { callId }, select: { id: true } });
+            const byCall = await this.prisma.callSession.findUnique({ where: { callId }, select: { id: true } });
             if (byCall?.id) return byCall.id;
         }
 
         if (providerCallId) {
-            const byProvider = await prisma.callSession.findUnique({
+            const byProvider = await this.prisma.callSession.findUnique({
                 where: { provider_providerCallId: { provider, providerCallId } },
                 select: { id: true },
             });
@@ -426,4 +438,8 @@ export class CallSessionService {
     }
 }
 
-export const callSessionService = new CallSessionService();
+export function buildCallSessionService(deps?: { prisma?: PrismaLike }): CallSessionService {
+    return new CallSessionService(deps);
+}
+
+export const callSessionService = buildCallSessionService();
