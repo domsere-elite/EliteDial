@@ -25,6 +25,7 @@ const fakeDeps = {
     dispatchWebhook: async (event: string, payload: unknown) => { captured.webhooksDispatched.push({ event, payload }); },
     auditTrack: async () => undefined,
     prismaUpdateCall: async () => undefined,
+    prismaUpdateCampaignAttempt: async () => undefined,
     prismaFindCallWithAttempt: async () => null,
     prismaFindCompletedCall: async () => null,
     releaseAgent: async () => undefined,
@@ -105,4 +106,44 @@ test('POST /signalwire/events/recording attaches recording URL', async () => {
         });
     assert.equal(res.status, 200);
     assert.equal(captured.recordingAttached.length, 1);
+});
+
+test('signalwire-events: completed status emits call.terminal with campaignId from attempt', async () => {
+    const { eventBus } = await import('../lib/event-bus');
+    const seen: any[] = [];
+    const listener = (p: any) => seen.push(p);
+    eventBus.on('call.terminal', listener);
+
+    const { createSignalwireEventsRouter } = await import('../routes/signalwire-events');
+    const app = express();
+    app.use(express.json());
+    app.use('/signalwire/events', createSignalwireEventsRouter({
+        callSessionUpdate: async () => undefined,
+        callSessionAddRecording: async () => undefined,
+        dispatchWebhook: async () => undefined,
+        auditTrack: async () => undefined,
+        prismaUpdateCall: async () => undefined,
+        prismaUpdateCampaignAttempt: async () => undefined,
+        prismaFindCallWithAttempt: async () => ({
+            id: 'call-1', agentId: null, accountId: null,
+            campaignAttempts: [{
+                id: 'a1', contactId: 'k1', campaignId: 'camp-x',
+                contact: { id: 'k1', attemptCount: 1, campaign: { maxAttemptsPerLead: 6, retryDelaySeconds: 600 } },
+            }],
+        }),
+        prismaFindCompletedCall: async () => ({ id: 'call-1', agentId: null, accountId: null }),
+        releaseAgent: async () => undefined,
+        crmPostCallEvent: async () => undefined,
+        reservationComplete: async () => undefined,
+    }));
+
+    await request(app)
+        .post('/signalwire/events/call-status')
+        .send({ call_id: 'sw-call-1', call_state: 'ended', duration: 42 });
+
+    eventBus.off('call.terminal', listener);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].signalwireCallId, 'sw-call-1');
+    assert.equal(seen[0].campaignId, 'camp-x');
+    assert.equal(seen[0].status, 'completed');
 });

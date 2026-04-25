@@ -6,6 +6,7 @@ import { callAuditService } from '../services/call-audit';
 import { crmAdapter } from '../services/crm-adapter';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { logger } from '../utils/logger';
+import { eventBus } from '../lib/event-bus';
 
 const SIGNALWIRE_STATE_MAP: Record<string, string> = {
     queued: 'initiated',
@@ -23,6 +24,7 @@ export interface SignalwireEventsDeps {
     dispatchWebhook: typeof defaultDispatchWebhook;
     auditTrack: typeof defaultAuditTrack;
     prismaUpdateCall: typeof defaultPrismaUpdateCall;
+    prismaUpdateCampaignAttempt: typeof defaultPrismaUpdateCampaignAttempt;
     prismaFindCallWithAttempt: typeof defaultFindCallWithAttempt;
     prismaFindCompletedCall: typeof defaultFindCompletedCall;
     releaseAgent: typeof defaultReleaseAgent;
@@ -66,6 +68,10 @@ async function defaultPrismaUpdateCall(callId: string, data: Record<string, unkn
         where: { signalwireCallId: callId },
         data,
     });
+}
+
+async function defaultPrismaUpdateCampaignAttempt(attemptId: string, data: Record<string, unknown>) {
+    await prisma.campaignAttempt.update({ where: { id: attemptId }, data });
 }
 
 async function defaultFindCallWithAttempt(callId: string) {
@@ -120,6 +126,7 @@ const defaultDeps: SignalwireEventsDeps = {
     dispatchWebhook: defaultDispatchWebhook,
     auditTrack: defaultAuditTrack,
     prismaUpdateCall: defaultPrismaUpdateCall,
+    prismaUpdateCampaignAttempt: defaultPrismaUpdateCampaignAttempt,
     prismaFindCallWithAttempt: defaultFindCallWithAttempt,
     prismaFindCompletedCall: defaultFindCompletedCall,
     releaseAgent: defaultReleaseAgent,
@@ -168,12 +175,9 @@ export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaul
         const attempt = withAttempt?.campaignAttempts?.[0];
         if (attempt) {
             if (mappedStatus === 'ringing' || mappedStatus === 'in-progress') {
-                await prisma.campaignAttempt.update({
-                    where: { id: attempt.id },
-                    data: {
-                        status: mappedStatus,
-                        ...(mappedStatus === 'in-progress' ? { outcome: 'human' } : {}),
-                    },
+                await deps.prismaUpdateCampaignAttempt(attempt.id, {
+                    status: mappedStatus,
+                    ...(mappedStatus === 'in-progress' ? { outcome: 'human' } : {}),
                 });
             }
             if (TERMINAL_STATES.has(mappedStatus)) {
@@ -183,13 +187,10 @@ export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaul
                     'no-answer': 'no-answer',
                     busy: 'busy',
                 };
-                await prisma.campaignAttempt.update({
-                    where: { id: attempt.id },
-                    data: {
-                        status: mappedStatus,
-                        outcome: outcomeMap[mappedStatus] || mappedStatus,
-                        completedAt: new Date(),
-                    },
+                await deps.prismaUpdateCampaignAttempt(attempt.id, {
+                    status: mappedStatus,
+                    outcome: outcomeMap[mappedStatus] || mappedStatus,
+                    completedAt: new Date(),
                 });
                 const maxAttempts = attempt.contact.campaign.maxAttemptsPerLead;
                 const retryMs = Math.max(30, attempt.contact.campaign.retryDelaySeconds) * 1000;
@@ -219,6 +220,17 @@ export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaul
                     account_id: completed.accountId || null,
                 });
             }
+        }
+
+        if (TERMINAL_STATES.has(mappedStatus)) {
+            const campaignId = withAttempt?.campaignAttempts?.[0]?.campaignId ?? null;
+            const internalCallId = withAttempt?.id ?? '';
+            eventBus.emit('call.terminal', {
+                callId: internalCallId,
+                signalwireCallId: call_id,
+                campaignId,
+                status: mappedStatus,
+            });
         }
 
         if (mappedStatus === 'in-progress') {
