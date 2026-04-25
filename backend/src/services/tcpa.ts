@@ -51,6 +51,44 @@ export const getContactTimezone = (
 };
 
 /**
+ * Compute the next 8 AM in the given timezone, relative to `now`.
+ * If we are currently before 8 AM local, returns 8 AM today; otherwise 8 AM tomorrow.
+ */
+export const nextCallingWindowStart = (timezone?: string | null, now: Date = new Date()): Date => {
+    const tz = timezone || DEFAULT_TIMEZONE;
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        hour: 'numeric',
+        hour12: false,
+    });
+    let localHour: number;
+    try {
+        localHour = parseInt(formatter.format(now), 10);
+    } catch {
+        localHour = parseInt(
+            new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_TIMEZONE, hour: 'numeric', hour12: false }).format(now),
+            10,
+        );
+    }
+    const dayOffset = localHour < CALLING_WINDOW_START_HOUR ? 0 : 1;
+    const base = new Date(now.getTime() + dayOffset * 86_400_000);
+    const dateParts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(base);
+    const y = dateParts.find(p => p.type === 'year')!.value;
+    const m = dateParts.find(p => p.type === 'month')!.value;
+    const d = dateParts.find(p => p.type === 'day')!.value;
+    const utcGuess = new Date(`${y}-${m}-${d}T${String(CALLING_WINDOW_START_HOUR).padStart(2, '0')}:00:00Z`);
+    const tzGuessHour = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(utcGuess),
+        10,
+    );
+    const offsetHours = CALLING_WINDOW_START_HOUR - tzGuessHour;
+    return new Date(utcGuess.getTime() + offsetHours * 3_600_000);
+};
+
+/**
  * Get calling window status details for diagnostics/display.
  */
 export const getCallingWindowStatus = (timezone?: string | null): {

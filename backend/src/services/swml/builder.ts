@@ -266,3 +266,28 @@ export function transferSwml(params: TransferSwmlParams): SwmlDocument {
         },
     };
 }
+
+export interface BridgeOutboundAiParams {
+    retellSipAddress: string; // sip:agent_xxx@host
+    from: string;             // caller ID (DID)
+}
+
+export function bridgeOutboundAiSwml(params: BridgeOutboundAiParams): SwmlDocument {
+    return {
+        version: '1.0.0',
+        sections: {
+            main: [
+                {
+                    connect: {
+                        to: params.retellSipAddress,
+                        from: params.from,
+                        timeout: 30,
+                        answer_on_bridge: true,
+                    },
+                    on_failure: [{ hangup: {} }],
+                },
+                { record_call: { stereo: true, format: 'mp3' } },
+            ],
+        },
+    };
+}

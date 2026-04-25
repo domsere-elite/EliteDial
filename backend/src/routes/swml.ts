@@ -11,6 +11,7 @@ import {
     voicemailSwml,
     queueHoldSwml,
     bridgeOutboundSwml,
+    bridgeOutboundAiSwml,
     transferSwml,
     hangupSwml,
 } from '../services/swml/builder';
@@ -91,12 +92,24 @@ export interface SwmlRouteDeps {
     ensureInboundCallRecord: typeof defaultEnsureInboundCallRecord;
     reserveAvailableAgent: typeof defaultReserveAvailableAgent;
     callAuditTrack: (...args: Parameters<typeof callAuditService.track>) => ReturnType<typeof callAuditService.track>;
+    loadCampaignForBridge: (campaignId: string) => Promise<{ id: string; retellSipAddress: string | null } | null>;
 }
+
+const defaultLoadCampaignForBridge = async (
+    campaignId: string,
+): Promise<{ id: string; retellSipAddress: string | null } | null> => {
+    if (!campaignId) return null;
+    return prisma.campaign.findUnique({
+        where: { id: campaignId },
+        select: { id: true, retellSipAddress: true },
+    });
+};
 
 const defaultDeps: SwmlRouteDeps = {
     ensureInboundCallRecord: defaultEnsureInboundCallRecord,
     reserveAvailableAgent: defaultReserveAvailableAgent,
     callAuditTrack: (...args) => callAuditService.track(...args),
+    loadCampaignForBridge: defaultLoadCampaignForBridge,
 };
 
 export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
@@ -188,9 +201,31 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
     });
 
     // POST /swml/bridge
-    router.post('/bridge', (req: Request, res: Response): void => {
-        const to = (req.query.to as string) || '';
+    router.post('/bridge', async (req: Request, res: Response): Promise<void> => {
+        const mode = (req.query.mode as string) || '';
         const from = (req.query.from as string) || '';
+
+        if (mode === 'ai_autonomous') {
+            const campaignId = (req.query.campaignId as string) || '';
+            try {
+                const campaign = await deps.loadCampaignForBridge(campaignId);
+                if (!campaign || !campaign.retellSipAddress) {
+                    logger.warn('swml.bridge ai_autonomous: campaign or retellSipAddress missing — returning hangup', { campaignId });
+                    res.json(hangupSwml('AI agent not available.'));
+                    return;
+                }
+                res.json(bridgeOutboundAiSwml({
+                    retellSipAddress: campaign.retellSipAddress,
+                    from,
+                }));
+            } catch (err) {
+                logger.error('swml.bridge ai_autonomous: loadCampaignForBridge threw — returning hangup', { campaignId, err });
+                res.json(hangupSwml('AI agent not available.'));
+            }
+            return;
+        }
+
+        const to = (req.query.to as string) || '';
         if (!to) {
             res.json(hangupSwml('Destination number missing.'));
             return;

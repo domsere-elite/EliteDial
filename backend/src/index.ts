@@ -28,6 +28,11 @@ import { reservationCleanup } from './services/reservation-cleanup';
 import { crmRetryQueue } from './services/crm-retry-queue';
 import { computeHealth } from './services/health';
 import { correlationId } from './middleware/correlation';
+import { validateEnvOrExit, validateActivationsOrWarn } from './lib/env-validation';
+import { aiAutonomousWorker } from './services/ai-autonomous-worker';
+import { concurrencyLimiter } from './services/concurrency-limiter';
+
+validateEnvOrExit();
 
 const app = express();
 
@@ -81,6 +86,21 @@ app.get('/live', (req, res) => {
     res.status(200).json({ status: 'ok' });
 });
 
+// ─── Dialer health: per-campaign slot occupancy ──
+app.get('/health/dialer', async (_req, res) => {
+    const campaigns = await prisma.campaign.findMany({
+        where: { status: 'active', dialMode: 'ai_autonomous' },
+        select: { id: true, name: true, maxConcurrentCalls: true },
+    });
+    const slots = campaigns.map(c => ({
+        campaignId: c.id,
+        name: c.name,
+        cap: c.maxConcurrentCalls,
+        active: concurrencyLimiter.active(c.id),
+    }));
+    res.json({ campaigns: slots });
+});
+
 // ─── Routes ──────────────────────────────────────
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/agents', agentRoutes);
@@ -115,6 +135,14 @@ server.listen(config.port, () => {
     logger.info(`Retell configured: ${config.isRetellConfigured}`);
     reservationCleanup.start();
     crmRetryQueue.start();
+    void (async () => {
+        try {
+            await validateActivationsOrWarn();
+            await aiAutonomousWorker.start();
+        } catch (err) {
+            logger.error('ai-autonomous-worker startup failed', { err });
+        }
+    })();
 });
 
 // ─── Graceful shutdown ───────────────────────────
@@ -122,6 +150,7 @@ const gracefulShutdown = async (signal: string) => {
     logger.info(`${signal} received — shutting down gracefully`);
     reservationCleanup.stop();
     crmRetryQueue.stop();
+    aiAutonomousWorker.stop();
 
     server.close(async () => {
         await prisma.$disconnect();

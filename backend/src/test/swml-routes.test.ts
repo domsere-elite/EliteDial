@@ -7,6 +7,7 @@ import { createSwmlRouter } from '../routes/swml';
 const noopTrack = async () => undefined as any;
 const fakeEnsure = async () => 'fake-internal-call-id';
 const fakeReserve = async () => ({ id: 'agent-1', extension: '1001' });
+const fakeLoadCampaign = async (_id: string) => null;
 
 const app = express();
 app.use(express.json());
@@ -14,6 +15,7 @@ app.use('/swml', createSwmlRouter({
     ensureInboundCallRecord: fakeEnsure,
     reserveAvailableAgent: fakeReserve,
     callAuditTrack: noopTrack,
+    loadCampaignForBridge: fakeLoadCampaign,
 }));
 
 test('POST /swml/inbound returns JSON SWML document with IVR prompt', async () => {
@@ -81,4 +83,64 @@ test('POST /swml/transfer with missing "to" returns hangup document (not 500)', 
         .send({ call_id: 'test-call-t2' });
     assert.equal(res.status, 200);
     assert.ok(res.body.sections.main.some((s: any) => s.hangup !== undefined));
+});
+
+test('swml-routes: /bridge with mode=ai_autonomous returns Retell SIP doc', async () => {
+    const baseDeps = {
+        ensureInboundCallRecord: async () => 'call-1',
+        reserveAvailableAgent: async () => null,
+        callAuditTrack: async () => undefined as any,
+        loadCampaignForBridge: async (id: string) =>
+            id === 'c-ok' ? { id, retellSipAddress: 'sip:agent_x@retell.example' } : null,
+    };
+    const app = express();
+    app.use(express.json());
+    app.use('/swml', createSwmlRouter(baseDeps));
+
+    const res = await request(app)
+        .post('/swml/bridge?mode=ai_autonomous&campaignId=c-ok&from=%2B15551234567')
+        .send({});
+    assert.equal(res.status, 200);
+    const connect = res.body.sections.main.find((s: any) => s.connect !== undefined);
+    assert.equal(connect.connect.to, 'sip:agent_x@retell.example');
+    assert.equal(connect.connect.from, '+15551234567');
+});
+
+test('swml-routes: /bridge with mode=ai_autonomous + missing campaign returns hangup', async () => {
+    const baseDeps = {
+        ensureInboundCallRecord: async () => 'call-1',
+        reserveAvailableAgent: async () => null,
+        callAuditTrack: async () => undefined as any,
+        loadCampaignForBridge: async (id: string) =>
+            id === 'c-ok' ? { id, retellSipAddress: 'sip:agent_x@retell.example' } : null,
+    };
+    const app = express();
+    app.use(express.json());
+    app.use('/swml', createSwmlRouter(baseDeps));
+
+    const res = await request(app)
+        .post('/swml/bridge?mode=ai_autonomous&campaignId=c-missing&from=%2B15551234567')
+        .send({});
+    assert.equal(res.status, 200);
+    const hangup = res.body.sections.main.find((s: any) => s.hangup !== undefined);
+    assert.ok(hangup, 'hangup step present when campaign missing');
+});
+
+test('swml-routes: /bridge with to+from (progressive path) still works', async () => {
+    const baseDeps = {
+        ensureInboundCallRecord: async () => 'call-1',
+        reserveAvailableAgent: async () => null,
+        callAuditTrack: async () => undefined as any,
+        loadCampaignForBridge: async (_id: string) => null,
+    };
+    const app = express();
+    app.use(express.json());
+    app.use('/swml', createSwmlRouter(baseDeps));
+
+    const res = await request(app)
+        .post('/swml/bridge?to=%2B15551234567&from=%2B15559998888')
+        .send({});
+    assert.equal(res.status, 200);
+    const connect = res.body.sections.main.find((s: any) => s.connect !== undefined);
+    assert.equal(connect.connect.to, '+15551234567');
 });
