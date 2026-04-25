@@ -7,8 +7,31 @@ import { computeDialerGuardrails } from '../services/dialer-guardrails';
 import { complianceFrequency } from '../services/compliance-frequency';
 import { classifyImportCandidates } from '../services/campaign-import';
 import { validate, createCampaignSchema, updateCampaignSchema, createCampaignListSchema, importContactsSchema } from '../lib/validation';
+import { eventBus } from '../lib/event-bus';
 
 const router = Router();
+
+interface AiAutonomousActivationCheck {
+    ok: boolean;
+    missing: string[];
+}
+
+export function checkAiAutonomousActivation(c: {
+    dialMode: string;
+    status: string;
+    retellAgentId: string | null;
+    retellSipAddress: string | null;
+    retellAgentPromptVersion: string | null;
+}): AiAutonomousActivationCheck {
+    if (c.dialMode !== 'ai_autonomous' || c.status !== 'active') {
+        return { ok: true, missing: [] };
+    }
+    const missing: string[] = [];
+    if (!c.retellAgentId) missing.push('retellAgentId');
+    if (!c.retellSipAddress) missing.push('retellSipAddress');
+    if (!c.retellAgentPromptVersion) missing.push('retellAgentPromptVersion');
+    return { ok: missing.length === 0, missing };
+}
 
 const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
 
@@ -321,40 +344,99 @@ router.get('/:id', authenticate, requireMinRole('supervisor'), async (req: Reque
 
 router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(updateCampaignSchema), async (req: Request, res: Response): Promise<void> => {
     const campaignId = paramValue(req.params.id);
-    const campaign = await prisma.campaign.update({
+
+    const current = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!current) {
+        res.status(404).json({ error: 'Campaign not found' });
+        return;
+    }
+
+    const validated = req.body;
+    const merged = { ...current, ...validated };
+    const check = checkAiAutonomousActivation(merged as any);
+    if (!check.ok) {
+        res.status(400).json({
+            error: 'ai_autonomous_missing_fields',
+            missing: check.missing,
+            message: `Cannot activate ai_autonomous campaign without: ${check.missing.join(', ')}`,
+        });
+        return;
+    }
+
+    const updated = await prisma.campaign.update({
         where: { id: campaignId },
         data: {
-            name: req.body.name,
-            description: req.body.description,
-            dialMode: req.body.dialMode,
-            timezone: req.body.timezone,
-            maxAttemptsPerLead: req.body.maxAttemptsPerLead,
-            retryDelaySeconds: req.body.retryDelaySeconds === undefined ? undefined : Math.max(30, Math.round(toNumber(req.body.retryDelaySeconds, 600))),
-            maxConcurrentCalls: req.body.maxConcurrentCalls === undefined ? undefined : Math.max(0, Math.round(toNumber(req.body.maxConcurrentCalls, 0))),
+            name: validated.name,
+            description: validated.description,
+            dialMode: validated.dialMode,
+            timezone: validated.timezone,
+            maxAttemptsPerLead: validated.maxAttemptsPerLead,
+            retryDelaySeconds: validated.retryDelaySeconds === undefined ? undefined : Math.max(30, Math.round(toNumber(validated.retryDelaySeconds, 600))),
+            maxConcurrentCalls: validated.maxConcurrentCalls === undefined ? undefined : Math.max(0, Math.round(toNumber(validated.maxConcurrentCalls, 0))),
+            retellAgentId: validated.retellAgentId,
+            retellSipAddress: validated.retellSipAddress,
+            retellAgentPromptVersion: validated.retellAgentPromptVersion,
         },
     });
 
-    res.json(campaign);
+    if (current.status !== updated.status) {
+        if (updated.status === 'active') eventBus.emit('campaign.activated', { campaignId: updated.id });
+        if (updated.status === 'paused') eventBus.emit('campaign.paused', { campaignId: updated.id });
+    }
+
+    res.json(updated);
 });
 
 router.post('/:id/start', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
     const campaignId = paramValue(req.params.id);
-    const campaign = await prisma.campaign.update({
+
+    const current = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!current) {
+        res.status(404).json({ error: 'Campaign not found' });
+        return;
+    }
+
+    const check = checkAiAutonomousActivation({ ...current, status: 'active' });
+    if (!check.ok) {
+        res.status(400).json({
+            error: 'ai_autonomous_missing_fields',
+            missing: check.missing,
+            message: `Cannot activate ai_autonomous campaign without: ${check.missing.join(', ')}`,
+        });
+        return;
+    }
+
+    const updated = await prisma.campaign.update({
         where: { id: campaignId },
         data: { status: 'active' },
     });
 
-    res.json(campaign);
+    if (current.status !== updated.status) {
+        eventBus.emit('campaign.activated', { campaignId: updated.id });
+    }
+
+    res.json(updated);
 });
 
 router.post('/:id/pause', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
     const campaignId = paramValue(req.params.id);
-    const campaign = await prisma.campaign.update({
+
+    const current = await prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!current) {
+        res.status(404).json({ error: 'Campaign not found' });
+        return;
+    }
+
+    const updated = await prisma.campaign.update({
         where: { id: campaignId },
         data: { status: 'paused' },
     });
 
-    res.json(campaign);
+    if (current.status !== updated.status) {
+        eventBus.emit('campaign.paused', { campaignId: updated.id });
+    }
+
+    res.json(updated);
 });
 
 router.get('/:id/contacts', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
