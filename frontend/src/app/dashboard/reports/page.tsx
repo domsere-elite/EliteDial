@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import api from '@/lib/api';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, Legend, CartesianGrid } from 'recharts';
+import CallRecordingPlayer from '@/components/CallRecordingPlayer';
 
 interface CallRecord {
     id: string;
@@ -16,6 +17,7 @@ interface CallRecord {
     accountId: string;
     dispositionId: string | null;
     createdAt: string;
+    recordingUrl?: string | null;
     agent?: { firstName: string; lastName: string; username: string };
 }
 
@@ -70,6 +72,7 @@ export default function ReportsPage() {
     const [callLog, setCallLog] = useState<CallRecord[]>([]);
     const [callLogTotal, setCallLogTotal] = useState(0);
     const [logPage, setLogPage] = useState(1);
+    const [expandedCallId, setExpandedCallId] = useState<string | null>(null);
 
     const loadData = useCallback(async () => {
         try {
@@ -235,26 +238,49 @@ export default function ReportsPage() {
                                     <th>Duration</th>
                                     <th>Disposition</th>
                                     <th>Time</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {callLog.map((call) => (
-                                    <tr key={call.id}>
-                                        <td className="mono">{call.direction === 'outbound' ? 'OUT' : 'IN'}</td>
-                                        <td className="mono">{call.fromNumber}</td>
-                                        <td className="mono">{call.toNumber}</td>
-                                        <td>{call.agent ? `${call.agent.firstName} ${call.agent.lastName}` : '—'}</td>
-                                        <td className="mono">{call.accountId || '—'}</td>
-                                        <td>
-                                            <span className={`status-badge ${call.status === 'completed' ? 'status-available' : call.status === 'no-answer' ? 'status-offline' : 'status-break'}`}>
-                                                {call.status}
-                                            </span>
-                                        </td>
-                                        <td className="mono">{formatDuration(call.duration)}</td>
-                                        <td className="mono" style={{ color: 'var(--accent-blue)' }}>{call.dispositionId || '—'}</td>
-                                        <td className="mono topline">{formatTime(call.createdAt)}</td>
-                                    </tr>
-                                ))}
+                                {callLog.map((call) => {
+                                    const isExpanded = expandedCallId === call.id;
+                                    return (
+                                        <Fragment key={call.id}>
+                                            <tr>
+                                                <td className="mono">{call.direction === 'outbound' ? 'OUT' : 'IN'}</td>
+                                                <td className="mono">{call.fromNumber}</td>
+                                                <td className="mono">{call.toNumber}</td>
+                                                <td>{call.agent ? `${call.agent.firstName} ${call.agent.lastName}` : '—'}</td>
+                                                <td className="mono">{call.accountId || '—'}</td>
+                                                <td>
+                                                    <span className={`status-badge ${call.status === 'completed' ? 'status-available' : call.status === 'no-answer' ? 'status-offline' : 'status-break'}`}>
+                                                        {call.status}
+                                                    </span>
+                                                </td>
+                                                <td className="mono">{formatDuration(call.duration)}</td>
+                                                <td className="mono" style={{ color: 'var(--accent-blue)' }}>{call.dispositionId || '—'}</td>
+                                                <td className="mono topline">{formatTime(call.createdAt)}</td>
+                                                <td>
+                                                    {call.recordingUrl ? (
+                                                        <button
+                                                            className="btn btn-secondary btn-sm"
+                                                            onClick={() => setExpandedCallId(isExpanded ? null : call.id)}
+                                                        >
+                                                            {isExpanded ? 'Hide' : '▶ Play'}
+                                                        </button>
+                                                    ) : null}
+                                                </td>
+                                            </tr>
+                                            {isExpanded && call.recordingUrl && (
+                                                <tr>
+                                                    <td colSpan={10} style={{ padding: '8px 4px' }}>
+                                                        <CallRecordingPlayer recordingUrl={call.recordingUrl} duration={call.duration} />
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
