@@ -9,6 +9,7 @@ import {
     bridgeOutboundSwml,
     transferSwml,
     hangupSwml,
+    bridgeOutboundAiSwml,
 } from '../services/swml/builder';
 
 test('swml-builder: inbound IVR presents 3-option menu with action callback', () => {
@@ -116,4 +117,29 @@ test('swml-builder: hangupSwml is minimal and valid', () => {
     const doc = hangupSwml();
     assert.equal(doc.version, '1.0.0');
     assert.ok(doc.sections.main.some((s: any) => s.hangup !== undefined));
+});
+
+test('swml-builder: bridgeOutboundAiSwml connects to Retell SIP URI with caller ID', () => {
+    const doc = bridgeOutboundAiSwml({
+        retellSipAddress: 'sip:agent_abc123@5t4n6j0wnrl.sip.livekit.cloud',
+        from: '+15551234567',
+    });
+    assert.equal(doc.version, '1.0.0');
+    const main = doc.sections.main;
+    const connect = main.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present');
+    assert.equal(connect.connect.to, 'sip:agent_abc123@5t4n6j0wnrl.sip.livekit.cloud');
+    assert.equal(connect.connect.from, '+15551234567');
+    assert.equal(connect.connect.answer_on_bridge, true);
+});
+
+test('swml-builder: bridgeOutboundAiSwml always includes record_call', () => {
+    const doc = bridgeOutboundAiSwml({
+        retellSipAddress: 'sip:agent@example',
+        from: '+15551112222',
+    });
+    const recorder = doc.sections.main.find((s: any) => s.record_call !== undefined);
+    assert.ok(recorder, 'record_call step present');
+    assert.equal(recorder.record_call.stereo, true);
+    assert.equal(recorder.record_call.format, 'mp3');
 });
