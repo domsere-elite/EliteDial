@@ -480,7 +480,7 @@ router.get('/:id/attempts', authenticate, requireMinRole('supervisor'), async (r
             where: { campaignId },
             include: {
                 contact: { select: { firstName: true, lastName: true, primaryPhone: true } },
-                call: { select: { id: true, duration: true, status: true } },
+                call: { select: { id: true, duration: true, status: true, recordingUrl: true } },
             },
             orderBy: { startedAt: 'desc' },
             take: limit,
