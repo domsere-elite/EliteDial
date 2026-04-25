@@ -36,7 +36,7 @@ model Call {
   direction      String   // inbound | outbound
   fromNumber     String
   toNumber       String
-  status         String   @default("initiated") // initiated | ringing | in-progress | completed | failed | no-answer | busy | voicemail
+  status         String   @default("initiated") // initiated | ringing | in-progress | completed | failed | no-answer | busy | voicemail | blocked-precheck
   duration       Int      @default(0) // seconds
   recordingUrl   String?
   dispositionId  String?
@@ -50,6 +50,8 @@ model Call {
   providerMetadata Json?
   fdcpaNotice    Boolean  @default(false) // was FDCPA notice played
   dncChecked     Boolean  @default(false) // was DNC checked before dial
+  retellAgentPromptVersion  String?   // copied from Campaign at dial time
+  precheckBlockedReasons    String?   // comma-separated reasons; null on successful dials
   createdAt      DateTime @default(now())
   completedAt    DateTime?
 
@@ -282,6 +284,9 @@ model Campaign {
   maxCallsPerDIDPerDay   Int               @default(50)
   avoidRepeatDID         Boolean           @default(true)
   defaultDIDId           String?           // fallback DID if no proximity match
+  retellAgentId             String?   // Retell agent ID (mirrors Retell's UI)
+  retellSipAddress          String?   // Cached SIP URI, resolved from retellAgentId at campaign save
+  retellAgentPromptVersion  String?   // Operator-set audit tag, required non-empty to activate ai_autonomous
   createdById        String?
   createdBy          User?             @relation(fields: [createdById], references: [id])
   createdAt          DateTime          @default(now())
