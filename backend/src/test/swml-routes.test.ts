@@ -144,3 +144,54 @@ test('swml-routes: /bridge with to+from (progressive path) still works', async (
     const connect = res.body.sections.main.find((s: any) => s.connect !== undefined);
     assert.equal(connect.connect.to, '+15551234567');
 });
+
+test('swml-routes: AI bridge SWML doc has required SignalWire contract fields', async () => {
+    const baseDeps = {
+        ensureInboundCallRecord: async () => 'call-shape-1',
+        reserveAvailableAgent: async () => null,
+        callAuditTrack: async () => undefined as any,
+        loadCampaignForBridge: async (id: string) =>
+            id === 'c-shape' ? { id, retellSipAddress: 'sip:agent_test@retell.example' } : null,
+    };
+    const shapeApp = express();
+    shapeApp.use(express.json());
+    shapeApp.use('/swml', createSwmlRouter(baseDeps));
+
+    const res = await request(shapeApp)
+        .post('/swml/bridge?mode=ai_autonomous&campaignId=c-shape&from=%2B15551234567')
+        .send({});
+
+    assert.equal(res.status, 200);
+    const main = res.body.sections.main;
+    const connect = main.find((s: any) => s.connect !== undefined);
+
+    assert.ok(connect, 'connect step present');
+    assert.equal(connect.connect.timeout, 30, 'timeout=30 (SignalWire default answer window)');
+    assert.equal(connect.connect.answer_on_bridge, true, 'answer_on_bridge required for recording to start at correct time');
+    assert.ok(
+        Array.isArray(connect.on_failure) && connect.on_failure.some((s: any) => s.hangup !== undefined),
+        'on_failure must terminate the call gracefully',
+    );
+
+    const recorder = main.find((s: any) => s.record_call !== undefined);
+    assert.ok(recorder, 'record_call required for compliance audit trail');
+    assert.equal(recorder.record_call.stereo, true, 'stereo recording for both legs');
+    assert.equal(recorder.record_call.format, 'mp3');
+});
+
+test('swml-routes: progressive bridge SWML doc has record_call and correct from', async () => {
+    const res = await request(app)
+        .post('/swml/bridge?to=%2B15551234567&from=%2B15559998888')
+        .send({});
+
+    assert.equal(res.status, 200);
+    const main = res.body.sections.main;
+    const connect = main.find((s: any) => s.connect !== undefined);
+
+    assert.ok(connect, 'connect step present');
+    assert.equal(connect.connect.from, '+15559998888', 'caller ID threaded through');
+    assert.equal(connect.connect.timeout, 30);
+
+    const recorder = main.find((s: any) => s.record_call !== undefined);
+    assert.ok(recorder, 'record_call present for progressive bridge');
+});
