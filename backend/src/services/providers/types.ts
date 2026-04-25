@@ -17,6 +17,7 @@ export interface OutboundCallRequest {
     amdEnabled?: boolean;
     metadata?: Record<string, unknown>;
     clientState?: Record<string, unknown>;
+    swmlQuery?: Record<string, string>;   // serialized into the SWML URL; fallback to {to, from} if absent
 }
 
 export interface OutboundCallResult {

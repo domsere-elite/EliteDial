@@ -165,7 +165,12 @@ export class SignalWireService implements TelephonyProvider {
         }
 
         try {
-            const swmlUrl = `${params.callbackUrl}/swml/bridge?to=${encodeURIComponent(params.toNumber)}&from=${encodeURIComponent(params.fromNumber)}`;
+            const queryString = new URLSearchParams(
+                params.swmlQuery
+                    ? Object.entries(params.swmlQuery)
+                    : [['to', params.toNumber], ['from', params.fromNumber]],
+            ).toString();
+            const swmlUrl = `${params.callbackUrl}/swml/bridge?${queryString}`;
             const statusUrl = `${params.callbackUrl}/signalwire/events/call-status`;
 
             const response = await this.fetchImpl(`${this.baseUrl}/api/calling/calls`, {

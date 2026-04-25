@@ -117,3 +117,51 @@ test('unconfigured service returns mock call id without calling fetch', async ()
     assert.match(result!.providerCallId, /^mock-call-/);
     assert.equal(fetchMock.mock.calls.length, 0);
 });
+
+test('signalwire-service: initiateOutboundCall serializes swmlQuery into URL', async () => {
+    const fetchCalls: any[] = [];
+    const fakeFetch = (async (url: string, init: any) => {
+        fetchCalls.push({ url, body: JSON.parse(init.body) });
+        return new Response(JSON.stringify({ call_id: 'sw-1' }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const { SignalWireService } = await import('../services/signalwire');
+    const svc = new SignalWireService(
+        { projectId: 'p', apiToken: 't', spaceUrl: 'space.signalwire.com', allowSubscriberProvisioning: false },
+        { fetch: fakeFetch },
+    );
+    await svc.initiateOutboundCall({
+        fromNumber: '+15551112222',
+        toNumber: '+15553334444',
+        callbackUrl: 'https://elite.example',
+        swmlQuery: { mode: 'ai_autonomous', campaignId: 'c1', from: '+15551112222' },
+    });
+    const body = fetchCalls[0].body;
+    assert.match(body.params.url, /\/swml\/bridge\?/);
+    assert.match(body.params.url, /mode=ai_autonomous/);
+    assert.match(body.params.url, /campaignId=c1/);
+    assert.match(body.params.url, /from=%2B15551112222/);
+});
+
+test('signalwire-service: initiateOutboundCall without swmlQuery falls back to to+from query', async () => {
+    const fetchCalls: any[] = [];
+    const fakeFetch = (async (url: string, init: any) => {
+        fetchCalls.push({ url, body: JSON.parse(init.body) });
+        return new Response(JSON.stringify({ call_id: 'sw-2' }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const { SignalWireService } = await import('../services/signalwire');
+    const svc = new SignalWireService(
+        { projectId: 'p', apiToken: 't', spaceUrl: 'space.signalwire.com', allowSubscriberProvisioning: false },
+        { fetch: fakeFetch },
+    );
+    await svc.initiateOutboundCall({
+        fromNumber: '+15551112222',
+        toNumber: '+15553334444',
+        callbackUrl: 'https://elite.example',
+    });
+    const url = fetchCalls[0].body.params.url;
+    assert.match(url, /to=%2B15553334444/);
+    assert.match(url, /from=%2B15551112222/);
+    assert.ok(!url.match(/mode=/));
+});
