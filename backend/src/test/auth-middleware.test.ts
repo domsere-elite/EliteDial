@@ -12,7 +12,7 @@ process.env.SUPABASE_ANON_KEY = 'test-anon';
 
 // Import after env is set so config.supabase.jwtSecret picks up TEST_SECRET.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { authenticate } = require('../middleware/auth-supabase') as typeof import('../middleware/auth-supabase');
+const { buildAuthenticate } = require('../middleware/auth') as typeof import('../middleware/auth');
 
 type ProfileLookup = (id: string) => Promise<{
     id: string;
@@ -25,9 +25,8 @@ type ProfileLookup = (id: string) => Promise<{
 
 function makeApp(profileLookup: ProfileLookup) {
     const app = express();
-    app.get('/protected', authenticate({ profileLookup }), (req, res) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        res.json({ user: (req as any).user });
+    app.get('/protected', buildAuthenticate({ profileLookup }), (req, res) => {
+        res.json({ user: req.user });
     });
     return app;
 }

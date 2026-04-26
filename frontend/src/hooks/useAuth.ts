@@ -1,15 +1,16 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 import api, { logout as apiLogout } from '@/lib/api';
 
 interface User {
     id: string;
-    username: string;
     email: string;
     firstName: string;
     lastName: string;
     role: string;
     status: string;
+    extension?: string | null;
 }
 
 export function useAuth() {
@@ -18,35 +19,37 @@ export function useAuth() {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        try {
-            const savedToken = localStorage.getItem('elitedial_token');
-            const savedUser = localStorage.getItem('elitedial_user');
-            if (savedToken && savedUser) {
-                try {
-                    const parsedUser = JSON.parse(savedUser);
-                    setToken(savedToken);
-                    setUser(parsedUser);
-                } catch {
-                    localStorage.removeItem('elitedial_token');
-                    localStorage.removeItem('elitedial_user');
-                    setToken(null);
-                    setUser(null);
-                }
+        let mounted = true;
+
+        const hydrate = async (sessionToken: string | null) => {
+            if (!sessionToken) {
+                if (mounted) { setUser(null); setToken(null); }
+                return;
             }
-        } finally {
-            setLoading(false);
-        }
+            if (mounted) setToken(sessionToken);
+            try {
+                const res = await api.get('/auth/me');
+                if (mounted) setUser(res.data);
+            } catch {
+                if (mounted) { setUser(null); setToken(null); }
+            }
+        };
+
+        supabase.auth.getSession()
+            .then(({ data: { session } }) => hydrate(session?.access_token ?? null))
+            .finally(() => { if (mounted) setLoading(false); });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            hydrate(session?.access_token ?? null);
+        });
+
+        return () => { mounted = false; subscription.unsubscribe(); };
     }, []);
 
-    const login = useCallback(async (username: string, password: string) => {
-        const res = await api.post('/auth/login', { username, password });
-        const { token: newToken, refreshToken: newRefreshToken, user: newUser } = res.data;
-        localStorage.setItem('elitedial_token', newToken);
-        if (newRefreshToken) localStorage.setItem('elitedial_refresh_token', newRefreshToken);
-        localStorage.setItem('elitedial_user', JSON.stringify(newUser));
-        setToken(newToken);
-        setUser(newUser);
-        return newUser;
+    const login = useCallback(async (email: string, password: string) => {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        // useEffect's onAuthStateChange picks up the new session and hydrates user state.
     }, []);
 
     const logout = useCallback(async () => {
@@ -58,9 +61,7 @@ export function useAuth() {
     const updateStatus = useCallback(async (status: string) => {
         if (!user) return;
         await api.patch(`/agents/${user.id}/status`, { status });
-        const updated = { ...user, status };
-        setUser(updated);
-        localStorage.setItem('elitedial_user', JSON.stringify(updated));
+        setUser({ ...user, status });
     }, [user]);
 
     const hasRole = useCallback((minRole: string): boolean => {

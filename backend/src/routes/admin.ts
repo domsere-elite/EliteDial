@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
-import bcrypt from 'bcryptjs';
 import { authenticate } from '../middleware/auth';
 import { requireRole } from '../middleware/roles';
 import { dncService } from '../services/dnc';
-import { generateApiKey } from '../utils/jwt';
+import { generateApiKey } from '../utils/api-key';
+import { supabaseAdmin } from '../lib/supabase-admin';
 import {
     validate, updateAgentSchema, resetPasswordSchema, createPhoneSchema,
     addDncSchema, bulkDncImportSchema, updateQueueSchema, createDispositionSchema,
@@ -16,10 +16,10 @@ const paramValue = (value: string | string[] | undefined): string => (Array.isAr
 
 // ─── Agent Management ─────────────────────────
 // GET /api/admin/agents
-router.get('/agents', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.get('/agents', authenticate, requireRole('admin'), async (_req: Request, res: Response): Promise<void> => {
     const agents = await prisma.profile.findMany({
         select: {
-            id: true, username: true, email: true, firstName: true, lastName: true,
+            id: true, email: true, firstName: true, lastName: true,
             role: true, status: true, extension: true, createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
@@ -31,17 +31,34 @@ router.get('/agents', authenticate, requireRole('admin'), async (req: Request, r
 router.put('/agents/:id', authenticate, requireRole('admin'), validate(updateAgentSchema), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
     const { firstName, lastName, email, role, extension } = req.body;
+    if (email) {
+        const { error } = await supabaseAdmin().auth.admin.updateUserById(agentId, { email });
+        if (error) {
+            res.status(400).json({ error: error.message });
+            return;
+        }
+    }
     const agent = await prisma.profile.update({
         where: { id: agentId },
-        data: { firstName, lastName, email, role, extension },
+        data: {
+            ...(firstName !== undefined && { firstName }),
+            ...(lastName !== undefined && { lastName }),
+            ...(email !== undefined && { email }),
+            ...(role !== undefined && { role }),
+            ...(extension !== undefined && { extension }),
+        },
     });
     res.json(agent);
 });
 
-// DELETE /api/admin/agents/:id
+// DELETE /api/admin/agents/:id — Supabase delete cascades to Profile via FK.
 router.delete('/agents/:id', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
-    await prisma.profile.delete({ where: { id: agentId } });
+    const { error } = await supabaseAdmin().auth.admin.deleteUser(agentId);
+    if (error) {
+        res.status(400).json({ error: error.message });
+        return;
+    }
     res.json({ success: true });
 });
 
@@ -49,14 +66,17 @@ router.delete('/agents/:id', authenticate, requireRole('admin'), async (req: Req
 router.post('/agents/:id/reset-password', authenticate, requireRole('admin'), validate(resetPasswordSchema), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
     const { newPassword } = req.body;
-    const passwordHash = await bcrypt.hash(newPassword, 12);
-    await prisma.profile.update({ where: { id: agentId }, data: { passwordHash } });
+    const { error } = await supabaseAdmin().auth.admin.updateUserById(agentId, { password: newPassword });
+    if (error) {
+        res.status(400).json({ error: error.message });
+        return;
+    }
     res.json({ success: true });
 });
 
 // ─── Phone Numbers ────────────────────────────
 // GET /api/admin/phones
-router.get('/phones', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.get('/phones', authenticate, requireRole('admin'), async (_req: Request, res: Response): Promise<void> => {
     const phones = await prisma.phoneNumber.findMany({ orderBy: { createdAt: 'desc' } });
     res.json(phones);
 });
@@ -86,7 +106,7 @@ router.get('/dnc', authenticate, requireRole('admin'), async (req: Request, res:
 // POST /api/admin/dnc
 router.post('/dnc', authenticate, requireRole('admin'), validate(addDncSchema), async (req: Request, res: Response): Promise<void> => {
     const { phoneNumber, reason } = req.body;
-    await dncService.addToDNC(phoneNumber, reason, req.user!.username);
+    await dncService.addToDNC(phoneNumber, reason, req.user!.email);
     res.status(201).json({ success: true });
 });
 
@@ -107,13 +127,13 @@ router.get('/dnc/check/:phoneNumber', authenticate, async (req: Request, res: Re
 // POST /api/admin/dnc/import
 router.post('/dnc/import', authenticate, requireRole('admin'), validate(bulkDncImportSchema), async (req: Request, res: Response): Promise<void> => {
     const { numbers, reason } = req.body;
-    const imported = await dncService.bulkImport(numbers, reason, req.user!.username);
+    const imported = await dncService.bulkImport(numbers, reason, req.user!.email);
     res.json({ imported });
 });
 
 // ─── Queue Configuration ──────────────────────
 // GET /api/admin/queues
-router.get('/queues', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.get('/queues', authenticate, requireRole('admin'), async (_req: Request, res: Response): Promise<void> => {
     const queues = await prisma.queueConfig.findMany();
     res.json(queues);
 });
@@ -131,7 +151,7 @@ router.put('/queues/:id', authenticate, requireRole('admin'), validate(updateQue
 
 // ─── Disposition Codes ────────────────────────
 // GET /api/admin/dispositions
-router.get('/dispositions', authenticate, async (req: Request, res: Response): Promise<void> => {
+router.get('/dispositions', authenticate, async (_req: Request, res: Response): Promise<void> => {
     const codes = await prisma.dispositionCode.findMany({
         where: { isActive: true },
         orderBy: { category: 'asc' },
@@ -148,7 +168,7 @@ router.post('/dispositions', authenticate, requireRole('admin'), validate(create
 
 // ─── API Keys ─────────────────────────────────
 // GET /api/admin/api-keys
-router.get('/api-keys', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.get('/api-keys', authenticate, requireRole('admin'), async (_req: Request, res: Response): Promise<void> => {
     const keys = await prisma.aPIKey.findMany({
         select: { id: true, key: true, label: true, isActive: true, createdAt: true, lastUsed: true },
         orderBy: { createdAt: 'desc' },
@@ -166,7 +186,7 @@ router.post('/api-keys', authenticate, requireRole('admin'), validate(createApiK
 
 // ─── Webhook Config ───────────────────────────
 // GET /api/admin/webhooks
-router.get('/webhooks', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.get('/webhooks', authenticate, requireRole('admin'), async (_req: Request, res: Response): Promise<void> => {
     const webhooks = await prisma.webhookConfig.findMany();
     res.json(webhooks);
 });

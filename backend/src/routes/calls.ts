@@ -323,7 +323,7 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
         from: selectedFromNumber,
         mode: callMode,
         provider: providerResult?.provider || (isAiMode ? primaryAIProvider.name : primaryTelephonyProvider.name),
-        agent: isAiMode ? 'retell-ai' : req.user!.username,
+        agent: isAiMode ? 'retell-ai' : req.user!.email,
         campaignContactId: requestedCampaignContactId,
     });
 
@@ -629,7 +629,7 @@ router.get('/', authenticate, async (req: Request, res: Response): Promise<void>
     const [calls, total] = await Promise.all([
         prisma.call.findMany({
             where,
-            include: { agent: { select: { id: true, firstName: true, lastName: true, username: true } } },
+            include: { agent: { select: { id: true, firstName: true, lastName: true, email: true } } },
             orderBy: { createdAt: 'desc' },
             skip: (pageNum - 1) * limitNum,
             take: limitNum,
@@ -912,7 +912,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response): Promise<vo
     const callId = paramValue(req.params.id);
     const call = await prisma.call.findUnique({
         where: { id: callId },
-        include: { agent: { select: { id: true, firstName: true, lastName: true, username: true } } },
+        include: { agent: { select: { id: true, firstName: true, lastName: true, email: true } } },
     });
 
     if (!call) {

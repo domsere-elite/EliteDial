@@ -1,38 +1,85 @@
-import { Request, Response, NextFunction } from 'express';
-import { verifyToken, TokenPayload } from '../utils/jwt';
+import { Request, Response, NextFunction, RequestHandler } from 'express';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
-import { isTokenBlacklisted } from '../lib/validation';
+import { config } from '../config';
+
+export interface AuthenticatedUser {
+    id: string;
+    email: string;
+    role: string;
+    firstName: string;
+    lastName: string;
+    extension: string | null;
+}
 
 declare global {
+    // eslint-disable-next-line @typescript-eslint/no-namespace
     namespace Express {
         interface Request {
-            user?: TokenPayload & { id: string };
+            user?: AuthenticatedUser;
         }
     }
 }
 
-export async function authenticate(req: Request, res: Response, next: NextFunction): Promise<void> {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ error: 'No token provided' });
-        return;
-    }
+interface SupabaseJwtClaims {
+    sub: string;
+    email: string;
+    aud: string;
+    exp: number;
+}
 
-    try {
-        const token = authHeader.split(' ')[1];
+export interface AuthDeps {
+    profileLookup?: (id: string) => Promise<AuthenticatedUser | null>;
+}
 
-        if (isTokenBlacklisted(token)) {
-            res.status(401).json({ error: 'Token has been revoked' });
+function authenticateImpl(deps: AuthDeps = {}): RequestHandler {
+    const lookup = deps.profileLookup ?? (async (id: string) => {
+        return prisma.profile.findUnique({
+            where: { id },
+            select: { id: true, email: true, firstName: true, lastName: true, role: true, extension: true },
+        });
+    });
+
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        const header = req.headers.authorization;
+        if (!header?.startsWith('Bearer ')) {
+            res.status(401).json({ error: 'Missing or malformed Authorization header' });
             return;
         }
-
-        const payload = verifyToken(token);
-        req.user = { ...payload, id: payload.userId };
+        const token = header.slice(7);
+        let claims: SupabaseJwtClaims;
+        try {
+            claims = jwt.verify(token, config.supabase.jwtSecret, {
+                algorithms: ['HS256'],
+                audience: 'authenticated',
+            }) as SupabaseJwtClaims;
+        } catch {
+            res.status(401).json({ error: 'Invalid or expired token' });
+            return;
+        }
+        const profile = await lookup(claims.sub);
+        if (!profile) {
+            res.status(401).json({ error: 'Profile not found for authenticated user' });
+            return;
+        }
+        req.user = {
+            id: profile.id,
+            email: profile.email,
+            role: profile.role,
+            firstName: profile.firstName,
+            lastName: profile.lastName,
+            extension: profile.extension,
+        };
         next();
-    } catch (err) {
-        res.status(401).json({ error: 'Invalid or expired token' });
-    }
+    };
 }
+
+// Drop-in middleware that uses real Prisma. Compatible with all existing
+// `app.use(authenticate)` / `router.get(..., authenticate, ...)` callsites.
+export const authenticate: RequestHandler = authenticateImpl();
+
+// Used by tests to inject a stubbed profile lookup.
+export const buildAuthenticate = authenticateImpl;
 
 export async function authenticateApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
     const apiKey = req.headers['x-api-key'] as string;
@@ -49,7 +96,7 @@ export async function authenticateApiKey(req: Request, res: Response, next: Next
         }
         await prisma.aPIKey.update({ where: { id: key.id }, data: { lastUsed: new Date() } });
         next();
-    } catch (err) {
+    } catch {
         res.status(500).json({ error: 'API key validation failed' });
     }
 }

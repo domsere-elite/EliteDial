@@ -69,7 +69,7 @@ router.get('/agents', authenticate, requireMinRole('supervisor'), async (req: Re
 
     const agents = await prisma.profile.findMany({
         where: { role: { in: ['agent', 'supervisor'] } },
-        select: { id: true, firstName: true, lastName: true, username: true, status: true },
+        select: { id: true, firstName: true, lastName: true, email: true, status: true },
     });
 
     const agentIds = agents.map(a => a.id);

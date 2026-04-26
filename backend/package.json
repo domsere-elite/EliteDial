@@ -17,7 +17,6 @@
     "@prisma/client": "^6.4.1",
     "@supabase/supabase-js": "^2.104.1",
     "axios": "^1.7.9",
-    "bcryptjs": "^2.4.3",
     "compression": "^1.7.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -31,7 +30,6 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",

@@ -1,10 +1,26 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import http from 'node:http';
-import { verifyToken, TokenPayload } from '../utils/jwt';
-import { isTokenBlacklisted } from './validation';
+import jwt from 'jsonwebtoken';
+import { prisma } from './prisma';
+import { config } from '../config';
 import { logger } from '../utils/logger';
 
 let io: SocketIOServer | null = null;
+
+interface SupabaseJwtClaims {
+    sub: string;
+    email: string;
+    aud: string;
+    exp: number;
+}
+
+interface SocketUser {
+    userId: string;
+    email: string;
+    role: string;
+    firstName: string;
+    lastName: string;
+}
 
 /**
  * Initialise Socket.IO on the given HTTP server and return the io instance.
@@ -23,43 +39,60 @@ export function setupSocketIO(server: http.Server): SocketIOServer {
     });
 
     // ─── Authentication middleware ───────────────────
-    io.use((socket: Socket, next) => {
+    io.use(async (socket: Socket, next) => {
         try {
-            const token = socket.handshake.auth?.token as string | undefined;
+            const headerToken = socket.handshake.headers?.authorization?.toString().replace(/^Bearer /, '');
+            const token = (socket.handshake.auth?.token as string | undefined) || headerToken;
             if (!token) {
                 return next(new Error('Authentication required'));
             }
 
-            if (isTokenBlacklisted(token)) {
-                return next(new Error('Token has been revoked'));
+            let claims: SupabaseJwtClaims;
+            try {
+                claims = jwt.verify(token, config.supabase.jwtSecret, {
+                    algorithms: ['HS256'],
+                    audience: 'authenticated',
+                }) as SupabaseJwtClaims;
+            } catch {
+                return next(new Error('Invalid or expired token'));
             }
 
-            const payload: TokenPayload = verifyToken(token);
-            // Attach user data to the socket for later use
-            (socket as any).user = payload;
+            const profile = await prisma.profile.findUnique({
+                where: { id: claims.sub },
+                select: { id: true, email: true, role: true, firstName: true, lastName: true },
+            });
+            if (!profile) {
+                return next(new Error('Profile not found'));
+            }
+
+            const user: SocketUser = {
+                userId: profile.id,
+                email: profile.email,
+                role: profile.role,
+                firstName: profile.firstName,
+                lastName: profile.lastName,
+            };
+            (socket as unknown as { user: SocketUser }).user = user;
             next();
         } catch (err) {
             logger.warn('Socket authentication failed', {
                 error: err instanceof Error ? err.message : String(err),
             });
-            next(new Error('Invalid or expired token'));
+            next(new Error('Authentication failed'));
         }
     });
 
     // ─── Connection handler ─────────────────────────
     io.on('connection', (socket: Socket) => {
-        const user: TokenPayload = (socket as any).user;
+        const user: SocketUser = (socket as unknown as { user: SocketUser }).user;
 
-        // Join user-specific room
         socket.join(`user:${user.userId}`);
-
-        // Join role-based room
         socket.join(`role:${user.role}`);
 
         logger.info('Socket connected', {
             socketId: socket.id,
             userId: user.userId,
-            username: user.username,
+            email: user.email,
             role: user.role,
         });
 

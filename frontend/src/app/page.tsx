@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function LoginPage() {
-    const [username, setUsername] = useState('');
+    const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -39,10 +39,11 @@ export default function LoginPage() {
         setLoading(true);
 
         try {
-            await login(username, password);
+            await login(email, password);
             router.push('/dashboard');
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Login failed');
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Login failed';
+            setError(message);
         } finally {
             setLoading(false);
         }
@@ -78,13 +79,14 @@ export default function LoginPage() {
 
                 <form onSubmit={handleSubmit}>
                     <div>
-                        <label>Username</label>
+                        <label>Email</label>
                         <input
-                            type="text"
+                            type="email"
                             className="input"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            placeholder="Enter username"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="you@example.com"
+                            autoComplete="email"
                             autoFocus
                             required
                         />
@@ -126,14 +128,6 @@ export default function LoginPage() {
                     </button>
                 </form>
 
-                {process.env.NEXT_PUBLIC_DEMO_MODE === 'true' && (
-                    <div className="login-demo">
-                        <div className="topline">Demo Access</div>
-                        <div className="mono" style={{ marginTop: 6, fontWeight: 700 }}>
-                            admin / admin123
-                        </div>
-                    </div>
-                )}
             </div>
         </div>
     );

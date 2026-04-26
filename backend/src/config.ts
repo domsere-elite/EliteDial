@@ -13,8 +13,6 @@ const toBool = (value: string | undefined, fallback: boolean): boolean => {
 
 export const config = {
     port: parseInt(process.env.PORT || '5000', 10),
-    jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me',
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '8h',
     nodeEnv: process.env.NODE_ENV || 'development',
     signalwire: {
         projectId: process.env.SIGNALWIRE_PROJECT_ID || '',

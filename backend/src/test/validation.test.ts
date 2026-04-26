@@ -2,9 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    loginSchema,
     registerSchema,
-    changePasswordSchema,
     initiateCallSchema,
     createCampaignSchema,
     updateCampaignSchema,
@@ -13,33 +11,12 @@ import {
     bulkDncImportSchema,
     transferSchema,
     resetPasswordSchema,
-    blacklistToken,
-    isTokenBlacklisted,
 } from '../lib/validation';
-
-// ─── loginSchema ────────────────────────────────
-
-test('loginSchema: valid input passes', () => {
-    const result = loginSchema.safeParse({ username: 'admin', password: 'secret123' });
-    assert.ok(result.success);
-    assert.equal(result.data!.username, 'admin');
-});
-
-test('loginSchema: missing username fails', () => {
-    const result = loginSchema.safeParse({ password: 'secret123' });
-    assert.equal(result.success, false);
-});
-
-test('loginSchema: missing password fails', () => {
-    const result = loginSchema.safeParse({ username: 'admin' });
-    assert.equal(result.success, false);
-});
 
 // ─── registerSchema ─────────────────────────────
 
 test('registerSchema: valid input passes', () => {
     const result = registerSchema.safeParse({
-        username: 'newuser',
         email: 'user@example.com',
         password: 'password123',
         firstName: 'Jane',
@@ -51,7 +28,6 @@ test('registerSchema: valid input passes', () => {
 
 test('registerSchema: invalid email fails', () => {
     const result = registerSchema.safeParse({
-        username: 'newuser',
         email: 'not-an-email',
         password: 'password123',
         firstName: 'Jane',
@@ -62,7 +38,6 @@ test('registerSchema: invalid email fails', () => {
 
 test('registerSchema: short password fails', () => {
     const result = registerSchema.safeParse({
-        username: 'newuser',
         email: 'user@example.com',
         password: 'short',
         firstName: 'Jane',
@@ -73,7 +48,6 @@ test('registerSchema: short password fails', () => {
 
 test('registerSchema: valid role enum passes', () => {
     const result = registerSchema.safeParse({
-        username: 'newuser',
         email: 'user@example.com',
         password: 'password123',
         firstName: 'Jane',
@@ -86,7 +60,6 @@ test('registerSchema: valid role enum passes', () => {
 
 test('registerSchema: invalid role fails', () => {
     const result = registerSchema.safeParse({
-        username: 'newuser',
         email: 'user@example.com',
         password: 'password123',
         firstName: 'Jane',
@@ -96,20 +69,11 @@ test('registerSchema: invalid role fails', () => {
     assert.equal(result.success, false);
 });
 
-// ─── changePasswordSchema ───────────────────────
-
-test('changePasswordSchema: valid passes', () => {
-    const result = changePasswordSchema.safeParse({
-        currentPassword: 'oldpass',
-        newPassword: 'newpass12',
-    });
-    assert.ok(result.success);
-});
-
-test('changePasswordSchema: short new password fails', () => {
-    const result = changePasswordSchema.safeParse({
-        currentPassword: 'oldpass',
-        newPassword: 'short',
+test('registerSchema: missing email fails', () => {
+    const result = registerSchema.safeParse({
+        password: 'password123',
+        firstName: 'Jane',
+        lastName: 'Doe',
     });
     assert.equal(result.success, false);
 });
@@ -216,19 +180,6 @@ test('resetPasswordSchema: valid passes', () => {
 test('resetPasswordSchema: short password fails (min 8)', () => {
     const result = resetPasswordSchema.safeParse({ newPassword: 'short' });
     assert.equal(result.success, false);
-});
-
-// ─── Token Blacklist ────────────────────────────
-
-test('blacklistToken adds token and isTokenBlacklisted returns true', () => {
-    const token = 'test-token-abc-123';
-    assert.equal(isTokenBlacklisted(token), false);
-    blacklistToken(token);
-    assert.equal(isTokenBlacklisted(token), true);
-});
-
-test('isTokenBlacklisted returns false for non-blacklisted token', () => {
-    assert.equal(isTokenBlacklisted('never-added-token'), false);
 });
 
 // ─── Phase 0: new dialMode enum ───

@@ -23,22 +23,11 @@ const phoneNumber = z.string().min(1).max(30);
 const optionalString = z.string().optional();
 
 // ─── Auth Schemas ────────────────────────────────
-export const loginSchema = z.object({
-    username: z.string().min(1, 'Username is required'),
-    password: z.string().min(1, 'Password is required'),
-});
-
-export const refreshSchema = z.object({
-    refreshToken: z.string().min(1, 'Refresh token is required'),
-});
-
-export const changePasswordSchema = z.object({
-    currentPassword: z.string().min(1, 'Current password is required'),
-    newPassword: z.string().min(8, 'New password must be at least 8 characters'),
-});
-
+// Login is handled directly by Supabase (supabase.auth.signInWithPassword) on
+// the frontend; refresh/logout/change-password are also frontend-only via
+// supabase-js. The only auth schema we still validate at the API edge is
+// /register, which an admin uses to provision a new user.
 export const registerSchema = z.object({
-    username: z.string().min(1, 'Username is required').max(100),
     email: z.string().email('Valid email is required'),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     firstName: z.string().min(1, 'First name is required').max(100),
@@ -213,21 +202,3 @@ export const assignVoicemailSchema = z.object({
     agentId: z.string().min(1, 'agentId is required'),
 });
 
-// ─── Token Blacklist (in-memory, simple) ─────────
-// For production, use Redis or a DB table
-const blacklistedTokens = new Set<string>();
-const TOKEN_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-
-export function blacklistToken(token: string): void {
-    blacklistedTokens.add(token);
-}
-
-export function isTokenBlacklisted(token: string): boolean {
-    return blacklistedTokens.has(token);
-}
-
-setInterval(() => {
-    if (blacklistedTokens.size > 10000) {
-        blacklistedTokens.clear();
-    }
-}, TOKEN_CLEANUP_INTERVAL_MS).unref();

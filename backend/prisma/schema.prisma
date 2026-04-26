@@ -10,10 +10,9 @@ datasource db {
 }
 
 model Profile {
-  id           String   @id @default(uuid())
-  username     String   @unique
+  // PK is auth.users.id (Supabase generates the UUID; DB-level FK enforces it).
+  id           String   @id @db.Uuid
   email        String   @unique
-  passwordHash String
   firstName    String
   lastName     String
   role         String   @default("agent") // agent | supervisor | admin

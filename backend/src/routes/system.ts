@@ -125,7 +125,7 @@ router.get('/readiness', authenticate, requireMinRole('supervisor'), async (req:
 router.post('/signalwire/browser-token-test', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
     const user = await prisma.profile.findUnique({
         where: { id: req.user!.id },
-        select: { id: true, username: true, email: true, extension: true },
+        select: { id: true, email: true, extension: true },
     });
 
     if (!user) {
@@ -134,7 +134,7 @@ router.post('/signalwire/browser-token-test', authenticate, requireMinRole('supe
     }
 
     const endpointReference = user.extension || user.id;
-    const result = await signalwireService.generateBrowserToken(user.id, user.username, user.email, endpointReference);
+    const result = await signalwireService.generateBrowserToken(user.id, user.email, user.email, endpointReference);
     if (!result.token) {
         res.status(400).json({
             ok: false,
@@ -173,7 +173,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
                 ],
             },
             include: {
-                agent: { select: { firstName: true, lastName: true, username: true, extension: true } },
+                agent: { select: { firstName: true, lastName: true, email: true, extension: true } },
             },
             orderBy: { createdAt: 'desc' },
             take: 25,
@@ -240,7 +240,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
             agent: call.agent
                 ? {
                     name: `${call.agent.firstName} ${call.agent.lastName}`,
-                    username: call.agent.username,
+                    email: call.agent.email,
                     extension: call.agent.extension || null,
                 }
                 : null,

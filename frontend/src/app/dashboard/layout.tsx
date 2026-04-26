@@ -4,45 +4,20 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import Link from 'next/link';
 import ThemeToggle from '@/components/ThemeToggle';
-import SessionTimeoutWarning from '@/components/SessionTimeoutWarning';
-import { getTokenExpiry } from '@/lib/jwt';
 import api from '@/lib/api';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-    const { user, token, loading, logout, updateStatus, hasRole } = useAuth();
+    const { user, loading, logout, updateStatus, hasRole } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
-    const [tokenExpiry, setTokenExpiry] = useState<number | undefined>();
     const [vmUnread, setVmUnread] = useState(0);
 
     useEffect(() => {
-        const saved = localStorage.getItem('elitedial_token');
-        if (saved) {
-            const exp = getTokenExpiry(saved);
-            if (exp) setTokenExpiry(exp);
-        }
-    }, [token]);
-
-    useEffect(() => {
+        if (!user) return;
         api.get('/voicemails?unreadOnly=true&limit=1').then(res => {
             setVmUnread(res.data.unreadCount || 0);
         }).catch(() => {});
-    }, []);
-
-    const handleExtendSession = async () => {
-        try {
-            const refreshToken = localStorage.getItem('elitedial_refresh_token');
-            if (refreshToken) {
-                const res = await api.post('/auth/refresh', { refreshToken });
-                localStorage.setItem('elitedial_token', res.data.token);
-                if (res.data.refreshToken) localStorage.setItem('elitedial_refresh_token', res.data.refreshToken);
-                const exp = getTokenExpiry(res.data.token);
-                if (exp) setTokenExpiry(exp);
-            }
-        } catch {
-            logout();
-        }
-    };
+    }, [user]);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -107,11 +82,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     return (
         <div className="app-shell">
-            <SessionTimeoutWarning
-                tokenExpiresAt={tokenExpiry}
-                onExtend={handleExtendSession}
-                onLogout={() => { logout(); router.push('/'); }}
-            />
             <aside className="sidebar">
                 <div className="sidebar-brand">
                     <div className="brand-mark">ED</div>
