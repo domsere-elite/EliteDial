@@ -10,6 +10,7 @@
     "test": "node --import tsx --test src/test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "seed": "tsx scripts/seed.ts",
+    "seed:admin": "tsx scripts/seed-admin.ts",
     "db:push": "npx prisma db push",
     "db:generate": "npx prisma generate"
   },

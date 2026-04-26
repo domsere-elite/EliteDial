@@ -97,15 +97,19 @@ git clone <repo-url>
 cd EliteDial
 
 # Configure
-cp .env.example .env
-# Edit .env with your database URL and credentials
+cp backend/.env.example backend/.env
+# Edit backend/.env with your Supabase + database credentials
+
+cp frontend/.env.example frontend/.env.local
+# Edit frontend/.env.local with NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 # Backend
 cd backend
 npm install
-npx prisma db push
+npx prisma migrate deploy
 npx prisma generate
-npm run seed        # Optional: seed demo data
+npm run seed                 # Optional: seed demo telephony data
+SEED_ADMIN_EMAIL=admin@yourcompany.com SEED_ADMIN_PASSWORD='ChangeMe!12345' npm run seed:admin
 npm run dev
 
 # Frontend (new terminal)
@@ -114,9 +118,22 @@ npm install
 npm run dev
 ```
 
-The backend starts on `http://localhost:5000` and the frontend on `http://localhost:3000`.
+The backend starts on `http://localhost:5000` and the frontend on `http://localhost:3000`. Sign in at the frontend with the email + password you used for `seed:admin`.
 
 > **Note:** The system starts in mock mode by default (`DIALER_MODE=mock`). No SignalWire or Retell credentials are required for local development.
+
+### First-time setup (Supabase Auth)
+
+EliteDial uses Supabase Auth. One-time setup steps:
+
+1. In the Supabase dashboard → **Authentication → Providers**, enable **Email**.
+2. In **Project Settings → API**, copy `URL`, `anon key`, `service_role key`, and the JWT secret.
+3. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` in `backend/.env`.
+4. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `frontend/.env.local`.
+5. Run `npx prisma migrate deploy` to apply the schema (Profile table + FK to `auth.users` + auto-create trigger).
+6. Run `npm run seed:admin` (with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` env vars) to provision the first admin user.
+
+`SUPABASE_SERVICE_ROLE_KEY` is server-only; never expose it to the frontend.
 
 ---
 
