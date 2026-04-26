@@ -1,7 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { formatDialMode } from '@/lib/dialMode';
+import { fetchRetellAgents, RetellAgent } from '@/lib/retellAgents';
 
 interface Campaign {
     id: string;
@@ -12,6 +14,7 @@ interface Campaign {
     maxConcurrentCalls: number;
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
+    retellAgentId?: string | null;
 }
 
 interface Props {
@@ -41,6 +44,25 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 export function SettingsTab({ campaign }: Props) {
     const router = useRouter();
+    const [agents, setAgents] = useState<RetellAgent[] | null>(null);
+
+    useEffect(() => {
+        if (campaign.dialMode !== 'ai_autonomous') return;
+        fetchRetellAgents().then(setAgents).catch(() => setAgents([]));
+    }, [campaign.dialMode]);
+
+    const assignedAgent =
+        campaign.dialMode === 'ai_autonomous' && campaign.retellAgentId
+            ? (agents?.find(a => a.id === campaign.retellAgentId) ?? null)
+            : null;
+
+    const agentLabel: React.ReactNode = (() => {
+        if (campaign.dialMode !== 'ai_autonomous') return null;
+        if (!campaign.retellAgentId) return <span style={{ color: 'var(--status-red-text)' }}>Not assigned</span>;
+        if (agents === null) return 'Loading…';
+        if (assignedAgent) return assignedAgent.name;
+        return <code>{campaign.retellAgentId}</code>;
+    })();
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -57,6 +79,13 @@ export function SettingsTab({ campaign }: Props) {
                 <Row label="Dial Mode" value={formatDialMode(campaign.dialMode)} />
                 <Row label="Timezone" value={TIMEZONE_LABELS[campaign.timezone] || campaign.timezone} />
             </div>
+
+            {campaign.dialMode === 'ai_autonomous' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>AI Agent</div>
+                    <Row label="Assigned Agent" value={agentLabel} />
+                </div>
+            )}
 
             {campaign.dialMode !== 'manual' && (
                 <div className="card">

@@ -21,6 +21,7 @@ interface Campaign {
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
     status: string;
+    retellAgentId?: string | null;
     _count?: { contacts: number; attempts: number };
 }
 
