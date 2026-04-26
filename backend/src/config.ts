@@ -37,6 +37,12 @@ export const config = {
         defaultFromNumber: process.env.RETELL_DEFAULT_FROM_NUMBER || '',
         fallbackNumber: process.env.RETELL_FALLBACK_NUMBER || '',
     },
+    supabase: {
+        url: process.env.SUPABASE_URL || '',
+        anonKey: process.env.SUPABASE_ANON_KEY || '',
+        serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+        jwtSecret: process.env.SUPABASE_JWT_SECRET || '',
+    },
     providers: {
         telephony: process.env.TELEPHONY_PROVIDER || '',
         ai: process.env.AI_PROVIDER || '',
