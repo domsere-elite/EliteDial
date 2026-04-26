@@ -118,6 +118,8 @@ export const createCampaignSchema = z.object({
     maxAttemptsPerLead: z.number().int().min(1).max(50).optional().default(6),
     retryDelaySeconds: z.number().int().min(30).optional().default(600),
     maxConcurrentCalls: z.number().int().min(0).optional().default(0),
+    retellAgentId: z.string().nullable().optional(),
+    retellSipAddress: z.string().nullable().optional(),
 });
 
 export const updateCampaignSchema = z.object({
@@ -130,7 +132,6 @@ export const updateCampaignSchema = z.object({
     maxConcurrentCalls: z.number().int().min(0).optional(),
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
-    retellAgentPromptVersion: z.string().nullable().optional(),
 });
 
 export const createCampaignListSchema = z.object({

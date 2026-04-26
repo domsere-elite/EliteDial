@@ -54,7 +54,7 @@ test('integration-e2e: HTTP completed webhook releases AI worker slot via shared
         loadCampaign: async (id) => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 1,
             retryDelaySeconds: 60, timezone: null,
-            retellAgentId: 'ag1', retellSipAddress: 'sip:x@retell.example', retellAgentPromptVersion: 'v1',
+            retellAgentId: 'ag1', retellSipAddress: 'sip:x@retell.example',
         }),
         listActiveAiCampaigns: async () => [{ id: 'camp-e2e-1' }],
         reserveNext: async () => {
@@ -118,7 +118,7 @@ test('integration-e2e: DNC error in real precheck → blocked row written, no di
         loadCampaign: async (id) => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 2,
             retryDelaySeconds: 60, timezone: 'America/Chicago',
-            retellAgentId: 'ag1', retellSipAddress: 'sip:x@retell.example', retellAgentPromptVersion: 'v1',
+            retellAgentId: 'ag1', retellSipAddress: 'sip:x@retell.example',
         }),
         listActiveAiCampaigns: async () => [{ id: 'camp-e2e-2' }],
         reserveNext: (() => {
@@ -174,7 +174,7 @@ test('integration-e2e: campaign.activated event triggers worker tick without pol
         loadCampaign: async (id) => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 1,
             retryDelaySeconds: 60, timezone: null,
-            retellAgentId: 'ag1', retellSipAddress: 'sip:x@retell.example', retellAgentPromptVersion: 'v1',
+            retellAgentId: 'ag1', retellSipAddress: 'sip:x@retell.example',
         }),
         listActiveAiCampaigns: async () => [],
         reserveNext: async () => {

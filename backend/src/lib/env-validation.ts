@@ -58,7 +58,6 @@ export async function validateActivationsOrWarn(): Promise<void> {
             OR: [
                 { retellAgentId: null },
                 { retellSipAddress: null },
-                { retellAgentPromptVersion: null },
             ],
         },
         select: { id: true, name: true },

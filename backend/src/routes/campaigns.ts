@@ -21,7 +21,6 @@ export function checkAiAutonomousActivation(c: {
     status: string;
     retellAgentId: string | null;
     retellSipAddress: string | null;
-    retellAgentPromptVersion: string | null;
 }): AiAutonomousActivationCheck {
     if (c.dialMode !== 'ai_autonomous' || c.status !== 'active') {
         return { ok: true, missing: [] };
@@ -29,7 +28,6 @@ export function checkAiAutonomousActivation(c: {
     const missing: string[] = [];
     if (!c.retellAgentId) missing.push('retellAgentId');
     if (!c.retellSipAddress) missing.push('retellSipAddress');
-    if (!c.retellAgentPromptVersion) missing.push('retellAgentPromptVersion');
     return { ok: missing.length === 0, missing };
 }
 
@@ -200,6 +198,8 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
         maxAttemptsPerLead,
         retryDelaySeconds,
         maxConcurrentCalls,
+        retellAgentId,
+        retellSipAddress,
     } = req.body;
 
     const campaign = await prisma.campaign.create({
@@ -211,6 +211,8 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
             maxAttemptsPerLead,
             retryDelaySeconds: Math.max(30, Math.round(toNumber(retryDelaySeconds, 600))),
             maxConcurrentCalls: Math.max(0, Math.round(toNumber(maxConcurrentCalls, 0))),
+            retellAgentId: retellAgentId ?? null,
+            retellSipAddress: retellSipAddress ?? null,
             createdById: req.user?.id,
         },
     });
@@ -375,7 +377,6 @@ router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(update
             maxConcurrentCalls: validated.maxConcurrentCalls === undefined ? undefined : Math.max(0, Math.round(toNumber(validated.maxConcurrentCalls, 0))),
             retellAgentId: validated.retellAgentId,
             retellSipAddress: validated.retellSipAddress,
-            retellAgentPromptVersion: validated.retellAgentPromptVersion,
         },
     });
 

@@ -6,7 +6,7 @@ import { checkAiAutonomousActivation } from '../routes/campaigns';
 test('campaigns-activation: non-ai_autonomous always passes', () => {
     const r = checkAiAutonomousActivation({
         dialMode: 'progressive', status: 'active',
-        retellAgentId: null, retellSipAddress: null, retellAgentPromptVersion: null,
+        retellAgentId: null, retellSipAddress: null,
     });
     assert.equal(r.ok, true);
 });
@@ -14,7 +14,7 @@ test('campaigns-activation: non-ai_autonomous always passes', () => {
 test('campaigns-activation: ai_autonomous + draft passes (not yet activating)', () => {
     const r = checkAiAutonomousActivation({
         dialMode: 'ai_autonomous', status: 'draft',
-        retellAgentId: null, retellSipAddress: null, retellAgentPromptVersion: null,
+        retellAgentId: null, retellSipAddress: null,
     });
     assert.equal(r.ok, true);
 });
@@ -22,16 +22,16 @@ test('campaigns-activation: ai_autonomous + draft passes (not yet activating)', 
 test('campaigns-activation: ai_autonomous + active + missing → reports missing fields', () => {
     const r = checkAiAutonomousActivation({
         dialMode: 'ai_autonomous', status: 'active',
-        retellAgentId: 'ag1', retellSipAddress: null, retellAgentPromptVersion: null,
+        retellAgentId: 'ag1', retellSipAddress: null,
     });
     assert.equal(r.ok, false);
-    assert.deepEqual(r.missing, ['retellSipAddress', 'retellAgentPromptVersion']);
+    assert.deepEqual(r.missing, ['retellSipAddress']);
 });
 
 test('campaigns-activation: ai_autonomous + active + complete passes', () => {
     const r = checkAiAutonomousActivation({
         dialMode: 'ai_autonomous', status: 'active',
-        retellAgentId: 'ag1', retellSipAddress: 'sip:x@y', retellAgentPromptVersion: '2026.04.v1',
+        retellAgentId: 'ag1', retellSipAddress: 'sip:x@y',
     });
     assert.equal(r.ok, true);
 });

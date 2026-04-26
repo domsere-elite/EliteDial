@@ -26,7 +26,7 @@ test('ai-autonomous-worker mock-mode integration: full path produces an initiate
         loadCampaign: async (id) => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 1,
             retryDelaySeconds: 600, timezone: 'America/Chicago',
-            retellAgentId: 'ag1', retellSipAddress: 'sip:x@y', retellAgentPromptVersion: 'v1',
+            retellAgentId: 'ag1', retellSipAddress: 'sip:x@y',
         }),
         listActiveAiCampaigns: async () => [{ id: 'camp-1' }],
         reserveNext: async () => {

@@ -16,7 +16,7 @@ const baseDeps = (overrides: any = {}) => {
         precheck: overrides.precheck || okPrecheck,
         loadCampaign: overrides.loadCampaign || (async (id: string): Promise<CampaignSlim> => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 2, retryDelaySeconds: 600, timezone: 'America/Chicago',
-            retellAgentId: 'ag1', retellSipAddress: 'sip:x@y', retellAgentPromptVersion: 'v1',
+            retellAgentId: 'ag1', retellSipAddress: 'sip:x@y',
         })),
         listActiveAiCampaigns: overrides.listActiveAiCampaigns || (async () => [{ id: 'camp-1' }]),
         reserveNext: overrides.reserveNext || (async () => null),
@@ -37,7 +37,7 @@ test('ai-autonomous-worker: tick with cap=0 logs once and breaks', async () => {
     const w = buildAIAutonomousWorker(baseDeps({
         loadCampaign: async (id: string) => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 0, retryDelaySeconds: 600, timezone: 'UTC',
-            retellAgentId: 'ag1', retellSipAddress: 'sip:x@y', retellAgentPromptVersion: 'v1',
+            retellAgentId: 'ag1', retellSipAddress: 'sip:x@y',
         }),
     }));
     await w.tick('camp-1');
@@ -100,7 +100,7 @@ test('ai-autonomous-worker: skips campaign missing Retell config', async () => {
     const w = buildAIAutonomousWorker(baseDeps({
         loadCampaign: async (id: string) => ({
             id, dialMode: 'ai_autonomous', status: 'active', maxConcurrentCalls: 2, retryDelaySeconds: 600, timezone: 'UTC',
-            retellAgentId: null, retellSipAddress: null, retellAgentPromptVersion: null,
+            retellAgentId: null, retellSipAddress: null,
         }),
         reserveNext: async () => { reserveCalled++; return null; },
     }));

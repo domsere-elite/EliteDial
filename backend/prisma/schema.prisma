@@ -286,7 +286,6 @@ model Campaign {
   defaultDIDId           String?           // fallback DID if no proximity match
   retellAgentId             String?   // Retell agent ID (mirrors Retell's UI)
   retellSipAddress          String?   // Cached SIP URI, resolved from retellAgentId at campaign save
-  retellAgentPromptVersion  String?   // Operator-set audit tag, required non-empty to activate ai_autonomous
   createdById        String?
   createdBy          User?             @relation(fields: [createdById], references: [id])
   createdAt          DateTime          @default(now())

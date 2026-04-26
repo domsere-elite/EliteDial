@@ -31,7 +31,6 @@ export interface CampaignSlim {
     timezone: string | null;
     retellAgentId: string | null;
     retellSipAddress: string | null;
-    retellAgentPromptVersion: string | null;
 }
 
 export interface ReserveResult {
@@ -119,7 +118,7 @@ export function buildAIAutonomousWorker(deps: AIAutonomousWorkerDeps): AIAutonom
         }
 
         // Skip if Retell config missing.
-        if (!campaign.retellAgentId || !campaign.retellSipAddress || !campaign.retellAgentPromptVersion) {
+        if (!campaign.retellAgentId || !campaign.retellSipAddress) {
             const skipKey = `retell-missing:${campaignId}`;
             if (!loggedSkip.has(skipKey)) {
                 loggedSkip.add(skipKey);
@@ -322,7 +321,6 @@ const defaultLoadCampaign = async (id: string): Promise<CampaignSlim | null> => 
             timezone: true,
             retellAgentId: true,
             retellSipAddress: true,
-            retellAgentPromptVersion: true,
         },
     });
 };
@@ -379,7 +377,6 @@ const defaultWriteBlockedCallRow = async (
         where: { id: call.id },
         data: {
             precheckBlockedReasons: reasons.join(','),
-            retellAgentPromptVersion: campaign.retellAgentPromptVersion,
         },
     });
 };
@@ -405,7 +402,6 @@ const defaultWriteInitiatedCallRow = async (
         where: { id: call.id },
         data: {
             signalwireCallId: result.provider === 'signalwire' ? result.providerCallId : undefined,
-            retellAgentPromptVersion: campaign.retellAgentPromptVersion,
         },
     });
     await prisma.campaignAttempt.create({
