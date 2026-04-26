@@ -22,6 +22,7 @@ import swmlRoutes from './routes/swml';
 import signalwireEventsRoutes from './routes/signalwire-events';
 import integrationRoutes from './routes/integration';
 import campaignRoutes from './routes/campaigns';
+import retellAgentsRoutes from './routes/retell-agents';
 import aiAgentRoutes from './routes/ai-agents';
 import settingsRoutes from './routes/settings';
 import { reservationCleanup } from './services/reservation-cleanup';
@@ -110,6 +111,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/campaigns', campaignRoutes);
+app.use('/api/retell', retellAgentsRoutes);
 app.use('/api/ai-agents', aiAgentRoutes);
 app.use('/api/settings', settingsRoutes);
 
