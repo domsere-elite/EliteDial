@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DialMode, DIAL_MODE_OPTIONS } from '@/lib/dialMode';
+import { fetchRetellAgents, RetellAgent } from '@/lib/retellAgents';
 
 export interface CampaignFormValues {
     name: string;
@@ -11,6 +12,8 @@ export interface CampaignFormValues {
     maxConcurrentCalls: number;
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
+    retellAgentId: string | null;
+    retellSipAddress: string | null;
 }
 
 const DEFAULT_VALUES: CampaignFormValues = {
@@ -21,6 +24,8 @@ const DEFAULT_VALUES: CampaignFormValues = {
     maxConcurrentCalls: 0,
     maxAttemptsPerLead: 6,
     retryDelaySeconds: 600,
+    retellAgentId: null,
+    retellSipAddress: null,
 };
 
 const RETRY_PRESETS: Array<{ label: string; seconds: number }> = [
@@ -47,6 +52,24 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
         return !RETRY_PRESETS.some(p => p.seconds === s);
     });
     const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+    const [agents, setAgents] = useState<RetellAgent[] | null>(null);
+    const [agentsLoading, setAgentsLoading] = useState(false);
+    const [agentsError, setAgentsError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (values.dialMode !== 'ai_autonomous') return;
+        if (agents !== null || agentsLoading) return;
+        setAgentsLoading(true);
+        fetchRetellAgents()
+            .then(list => {
+                setAgents(list);
+                setAgentsError(null);
+            })
+            .catch((err: any) => {
+                setAgentsError(err?.response?.data?.error || 'Failed to load Retell agents');
+            })
+            .finally(() => setAgentsLoading(false));
+    }, [values.dialMode, agents, agentsLoading]);
 
     const set = <K extends keyof CampaignFormValues>(key: K, value: CampaignFormValues[K]) => {
         setValues(prev => ({ ...prev, [key]: value }));
@@ -58,6 +81,9 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
         if (!values.name.trim()) errs.name = 'Name is required';
         if (values.maxAttemptsPerLead < 1 || values.maxAttemptsPerLead > 20) errs.maxAttemptsPerLead = 'Must be between 1 and 20';
         if (values.maxConcurrentCalls < 0) errs.maxConcurrentCalls = 'Cannot be negative';
+        if (values.dialMode === 'ai_autonomous' && !values.retellAgentId) {
+            errs.retellAgentId = 'Pick a Retell agent';
+        }
         setFieldErrors(errs);
         return Object.keys(errs).length === 0;
     };
@@ -122,6 +148,56 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                         </div>
                         {fieldErrors.maxConcurrentCalls && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.maxConcurrentCalls}</div>}
                     </div>
+                </div>
+            )}
+
+            {/* AI AGENT — only when dialMode is ai_autonomous */}
+            {values.dialMode === 'ai_autonomous' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>AI Agent</div>
+                    {agentsLoading && (
+                        <div style={{ fontSize: '0.786rem', color: 'var(--text-muted)' }}>Loading agents from Retell…</div>
+                    )}
+                    {agentsError && (
+                        <div className="notice notice-error" style={{ fontSize: '0.786rem' }}>
+                            {agentsError}
+                        </div>
+                    )}
+                    {agents && agents.length === 0 && (
+                        <div className="notice notice-error" style={{ fontSize: '0.786rem' }}>
+                            No agents found in your Retell account. Create one in the Retell dashboard, then reload this page.
+                        </div>
+                    )}
+                    {agents && agents.length > 0 && (
+                        <>
+                            <label>Retell Agent</label>
+                            <select
+                                className="select"
+                                value={values.retellAgentId ?? ''}
+                                onChange={e => {
+                                    const id = e.target.value || null;
+                                    const sip = id ? (agents.find(a => a.id === id)?.sipAddress ?? null) : null;
+                                    setValues(prev => ({ ...prev, retellAgentId: id, retellSipAddress: sip }));
+                                    setFieldErrors(prev => ({ ...prev, retellAgentId: '' }));
+                                }}
+                            >
+                                <option value="">— Select an agent —</option>
+                                {agents.map(a => (
+                                    <option key={a.id} value={a.id}>{a.name}</option>
+                                ))}
+                            </select>
+                            {values.retellAgentId && !agents.find(a => a.id === values.retellAgentId) && (
+                                <div className="notice notice-error" style={{ fontSize: '0.786rem', marginTop: 6 }}>
+                                    Previously assigned agent <code>{values.retellAgentId}</code> was not found in your Retell account. Pick a new one.
+                                </div>
+                            )}
+                            {fieldErrors.retellAgentId && (
+                                <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>
+                                    {fieldErrors.retellAgentId}
+                                </div>
+                            )}
+                        </>
+                    )}
                 </div>
             )}
 

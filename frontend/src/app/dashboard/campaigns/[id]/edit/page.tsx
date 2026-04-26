@@ -31,6 +31,8 @@ export default function EditCampaignPage() {
                 maxConcurrentCalls: c.maxConcurrentCalls,
                 maxAttemptsPerLead: c.maxAttemptsPerLead,
                 retryDelaySeconds: c.retryDelaySeconds,
+                retellAgentId: c.retellAgentId ?? null,
+                retellSipAddress: c.retellSipAddress ?? null,
             });
         }).catch(() => {
             setError('Failed to load campaign');
