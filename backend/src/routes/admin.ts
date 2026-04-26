@@ -17,7 +17,7 @@ const paramValue = (value: string | string[] | undefined): string => (Array.isAr
 // ─── Agent Management ─────────────────────────
 // GET /api/admin/agents
 router.get('/agents', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
-    const agents = await prisma.user.findMany({
+    const agents = await prisma.profile.findMany({
         select: {
             id: true, username: true, email: true, firstName: true, lastName: true,
             role: true, status: true, extension: true, createdAt: true,
@@ -31,7 +31,7 @@ router.get('/agents', authenticate, requireRole('admin'), async (req: Request, r
 router.put('/agents/:id', authenticate, requireRole('admin'), validate(updateAgentSchema), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
     const { firstName, lastName, email, role, extension } = req.body;
-    const agent = await prisma.user.update({
+    const agent = await prisma.profile.update({
         where: { id: agentId },
         data: { firstName, lastName, email, role, extension },
     });
@@ -41,7 +41,7 @@ router.put('/agents/:id', authenticate, requireRole('admin'), validate(updateAge
 // DELETE /api/admin/agents/:id
 router.delete('/agents/:id', authenticate, requireRole('admin'), async (req: Request, res: Response): Promise<void> => {
     const agentId = paramValue(req.params.id);
-    await prisma.user.delete({ where: { id: agentId } });
+    await prisma.profile.delete({ where: { id: agentId } });
     res.json({ success: true });
 });
 
@@ -50,7 +50,7 @@ router.post('/agents/:id/reset-password', authenticate, requireRole('admin'), va
     const agentId = paramValue(req.params.id);
     const { newPassword } = req.body;
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    await prisma.user.update({ where: { id: agentId }, data: { passwordHash } });
+    await prisma.profile.update({ where: { id: agentId }, data: { passwordHash } });
     res.json({ success: true });
 });
 

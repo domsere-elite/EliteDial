@@ -10,7 +10,7 @@ const paramValue = (value: string | string[] | undefined): string => (Array.isAr
 
 // GET /api/agents — list all agents (supervisor+)
 router.get('/', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const agents = await prisma.user.findMany({
+    const agents = await prisma.profile.findMany({
         select: {
             id: true, username: true, email: true, firstName: true, lastName: true,
             role: true, status: true, extension: true, createdAt: true,
@@ -31,7 +31,7 @@ router.patch('/:id/status', authenticate, validate(updateAgentStatusSchema), asy
         return;
     }
 
-    const agent = await prisma.user.update({
+    const agent = await prisma.profile.update({
         where: { id },
         data: { status },
         select: { id: true, username: true, status: true },
@@ -71,7 +71,7 @@ router.get('/:id/stats', authenticate, requireMinRole('supervisor'), async (req:
 
 // GET /api/agents/token — get SignalWire browser token for current agent
 router.get('/token/signalwire', authenticate, async (req: Request, res: Response): Promise<void> => {
-    const user = await prisma.user.findUnique({
+    const user = await prisma.profile.findUnique({
         where: { id: req.user!.id },
         select: { id: true, username: true, email: true, extension: true },
     });
@@ -98,7 +98,7 @@ router.get('/token/signalwire', authenticate, async (req: Request, res: Response
 });
 
 router.get('/token/signalwire-relay', authenticate, async (req: Request, res: Response): Promise<void> => {
-    const user = await prisma.user.findUnique({
+    const user = await prisma.profile.findUnique({
         where: { id: req.user!.id },
         select: { id: true, username: true, extension: true },
     });

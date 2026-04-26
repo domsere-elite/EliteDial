@@ -102,7 +102,7 @@ router.patch('/agents/:id/status', async (req: Request, res: Response): Promise<
         return;
     }
 
-    const agent = await prisma.user.update({
+    const agent = await prisma.profile.update({
         where: { id: agentId },
         data: { status },
         select: { id: true, username: true, status: true },

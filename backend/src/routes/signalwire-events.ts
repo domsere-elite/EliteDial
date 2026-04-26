@@ -109,7 +109,7 @@ async function defaultFindCompletedCall(callId: string) {
 }
 
 async function defaultReleaseAgent(agentId: string) {
-    await prisma.user.updateMany({ where: { id: agentId }, data: { status: 'available' } });
+    await prisma.profile.updateMany({ where: { id: agentId }, data: { status: 'available' } });
 }
 
 async function defaultCrmPostCallEvent(payload: Parameters<typeof crmAdapter.postCallEvent>[0]) {

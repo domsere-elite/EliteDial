@@ -13,7 +13,7 @@ router.post('/login', validate(loginSchema), async (req: Request, res: Response)
     try {
         const { username, password } = req.body;
 
-        const user = await prisma.user.findUnique({ where: { username } });
+        const user = await prisma.profile.findUnique({ where: { username } });
         if (!user) {
             res.status(401).json({ error: 'Invalid credentials' });
             return;
@@ -29,7 +29,7 @@ router.post('/login', validate(loginSchema), async (req: Request, res: Response)
         const refreshToken = generateRefreshToken({ userId: user.id, username: user.username, role: user.role });
 
         // Set user as available on login
-        await prisma.user.update({ where: { id: user.id }, data: { status: 'available' } });
+        await prisma.profile.update({ where: { id: user.id }, data: { status: 'available' } });
 
         res.json({
             token,
@@ -62,7 +62,7 @@ router.post('/refresh', validate(refreshSchema), async (req: Request, res: Respo
             return;
         }
 
-        const user = await prisma.user.findUnique({ where: { id: payload.userId } });
+        const user = await prisma.profile.findUnique({ where: { id: payload.userId } });
         if (!user) {
             res.status(401).json({ error: 'User no longer exists' });
             return;
@@ -82,7 +82,7 @@ router.post('/change-password', authenticate, validate(changePasswordSchema), as
     try {
         const { currentPassword, newPassword } = req.body;
 
-        const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+        const user = await prisma.profile.findUnique({ where: { id: req.user!.id } });
         if (!user) {
             res.status(404).json({ error: 'User not found' });
             return;
@@ -95,7 +95,7 @@ router.post('/change-password', authenticate, validate(changePasswordSchema), as
         }
 
         const passwordHash = await bcrypt.hash(newPassword, 12);
-        await prisma.user.update({
+        await prisma.profile.update({
             where: { id: user.id },
             data: { passwordHash },
         });
@@ -111,7 +111,7 @@ router.post('/register', authenticate, requireRole('admin'), validate(registerSc
     try {
         const { username, email, password, firstName, lastName, role, extension } = req.body;
 
-        const existing = await prisma.user.findFirst({
+        const existing = await prisma.profile.findFirst({
             where: { OR: [{ username }, { email }] },
         });
         if (existing) {
@@ -120,7 +120,7 @@ router.post('/register', authenticate, requireRole('admin'), validate(registerSc
         }
 
         const passwordHash = await bcrypt.hash(password, 12);
-        const user = await prisma.user.create({
+        const user = await prisma.profile.create({
             data: { username, email, passwordHash, firstName, lastName, role: role || 'agent', extension },
         });
 
@@ -145,7 +145,7 @@ router.post('/logout', authenticate, async (req: Request, res: Response): Promis
             const token = authHeader.split(' ')[1];
             blacklistToken(token);
         }
-        await prisma.user.update({ where: { id: req.user!.id }, data: { status: 'offline' } });
+        await prisma.profile.update({ where: { id: req.user!.id }, data: { status: 'offline' } });
         res.json({ message: 'Logged out successfully' });
     } catch (err) {
         res.status(500).json({ error: 'Internal server error' });
@@ -155,7 +155,7 @@ router.post('/logout', authenticate, async (req: Request, res: Response): Promis
 // GET /api/auth/me
 router.get('/me', authenticate, async (req: Request, res: Response): Promise<void> => {
     try {
-        const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+        const user = await prisma.profile.findUnique({ where: { id: req.user!.id } });
         if (!user) {
             res.status(404).json({ error: 'User not found' });
             return;

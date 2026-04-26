@@ -23,7 +23,7 @@ const swmlUrl = (req: Request, path: string): string => `${backendBase(req)}${pa
 
 const defaultReserveAvailableAgent = async (): Promise<{ id: string; extension: string } | null> => {
     for (let i = 0; i < 5; i += 1) {
-        const agent = await prisma.user.findFirst({
+        const agent = await prisma.profile.findFirst({
             where: {
                 role: { in: ['agent', 'supervisor', 'admin'] },
                 status: 'available',
@@ -32,7 +32,7 @@ const defaultReserveAvailableAgent = async (): Promise<{ id: string; extension: 
             orderBy: { updatedAt: 'asc' },
         });
         if (!agent) return null;
-        const claim = await prisma.user.updateMany({
+        const claim = await prisma.profile.updateMany({
             where: { id: agent.id, status: 'available' },
             data: { status: 'on-call' },
         });

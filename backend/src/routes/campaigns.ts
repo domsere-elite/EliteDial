@@ -282,7 +282,7 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
                     completedAt: null,
                 },
             }),
-            prisma.user.count({ where: { role: { in: ['agent', 'supervisor', 'admin'] }, status: 'available' } }),
+            prisma.profile.count({ where: { role: { in: ['agent', 'supervisor', 'admin'] }, status: 'available' } }),
         ]);
 
         const controls = computeDialerGuardrails({

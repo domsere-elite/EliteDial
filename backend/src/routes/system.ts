@@ -18,7 +18,7 @@ const extractDetails = (payload: unknown): Record<string, unknown> | null => {
 router.get('/readiness', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
     const backendBaseUrl = getBackendBaseUrl(req);
     const [users, phoneNumbers, queues, campaigns] = await Promise.all([
-        prisma.user.findMany({
+        prisma.profile.findMany({
             where: { role: { in: ['agent', 'supervisor', 'admin'] } },
             select: { id: true, firstName: true, lastName: true, role: true, status: true, extension: true },
             orderBy: [{ role: 'desc' }, { lastName: 'asc' }],
@@ -123,7 +123,7 @@ router.get('/readiness', authenticate, requireMinRole('supervisor'), async (req:
 });
 
 router.post('/signalwire/browser-token-test', authenticate, requireMinRole('supervisor'), async (req: Request, res: Response): Promise<void> => {
-    const user = await prisma.user.findUnique({
+    const user = await prisma.profile.findUnique({
         where: { id: req.user!.id },
         select: { id: true, username: true, email: true, extension: true },
     });
@@ -188,7 +188,7 @@ router.get('/signalwire/diagnostics', authenticate, requireMinRole('supervisor')
                 status: { in: ['initiated', 'ringing', 'in-progress'] },
             },
         }),
-        prisma.user.findMany({
+        prisma.profile.findMany({
             where: { role: { in: ['agent', 'supervisor', 'admin'] } },
             select: { id: true, firstName: true, lastName: true, status: true, extension: true },
             orderBy: { lastName: 'asc' },

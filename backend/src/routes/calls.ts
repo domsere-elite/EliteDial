@@ -314,7 +314,7 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
     }
 
     if (!isAiMode) {
-        await prisma.user.update({ where: { id: req.user!.id }, data: { status: 'on-call' } });
+        await prisma.profile.update({ where: { id: req.user!.id }, data: { status: 'on-call' } });
     }
 
     logger.info('Outbound call initiated', {
@@ -563,14 +563,14 @@ router.post('/:id/browser-status', authenticate, validate(browserStatusSchema), 
     });
 
     if (mappedStatus === 'in-progress') {
-        await prisma.user.updateMany({
+        await prisma.profile.updateMany({
             where: { id: req.user!.id },
             data: { status: 'on-call' },
         });
     }
 
     if (['completed', 'failed', 'busy', 'no-answer', 'voicemail'].includes(mappedStatus)) {
-        await prisma.user.updateMany({
+        await prisma.profile.updateMany({
             where: { id: req.user!.id },
             data: { status: 'available' },
         });
@@ -732,7 +732,7 @@ router.post('/simulate/inbound', authenticate, validate(simulateInboundSchema), 
     }
 
     if (scenario !== 'answer') {
-        await prisma.user.update({ where: { id: req.user!.id }, data: { status: 'available' } });
+        await prisma.profile.update({ where: { id: req.user!.id }, data: { status: 'available' } });
     }
 
     res.status(201).json({
@@ -860,7 +860,7 @@ router.post('/:id/hangup', authenticate, async (req: Request, res: Response): Pr
         },
     });
 
-    await prisma.user.update({ where: { id: req.user!.id }, data: { status: 'available' } });
+    await prisma.profile.update({ where: { id: req.user!.id }, data: { status: 'available' } });
     await resolveCampaignContactOutcome(
         call.id,
         nextStatus === 'busy' || nextStatus === 'failed' || nextStatus === 'no-answer' || nextStatus === 'voicemail'
@@ -991,7 +991,7 @@ router.post('/:id/disposition', authenticate, validate(dispositionSchema), async
     }
 
     // Set agent back to available
-    await prisma.user.update({ where: { id: req.user!.id }, data: { status: 'available' } });
+    await prisma.profile.update({ where: { id: req.user!.id }, data: { status: 'available' } });
     await resolveCampaignContactOutcome(call.id, 'completed');
 
     // Push to CRM webhook

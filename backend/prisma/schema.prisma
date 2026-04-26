@@ -9,7 +9,7 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model User {
+model Profile {
   id           String   @id @default(uuid())
   username     String   @unique
   email        String   @unique
@@ -44,7 +44,7 @@ model Call {
   accountId      String?  // CRM account reference
   accountName    String?
   agentId        String?
-  agent          User?    @relation(fields: [agentId], references: [id])
+  agent          Profile? @relation(fields: [agentId], references: [id])
   providerCallId String?
   signalwireCallId String?
   providerMetadata Json?
@@ -87,7 +87,7 @@ model CallSession {
   accountName         String?
   leadExternalId      String?
   agentId             String?
-  agent               User?            @relation(fields: [agentId], references: [id])
+  agent               Profile?         @relation(fields: [agentId], references: [id])
   campaignId          String?
   campaign            Campaign?        @relation(fields: [campaignId], references: [id])
   contactId           String?
@@ -186,7 +186,7 @@ model Voicemail {
   duration       Int      @default(0)
   isRead         Boolean  @default(false)
   assignedToId   String?
-  assignedTo     User?    @relation(fields: [assignedToId], references: [id])
+  assignedTo     Profile? @relation(fields: [assignedToId], references: [id])
   createdAt      DateTime @default(now())
 
   @@index([assignedToId])
@@ -287,7 +287,7 @@ model Campaign {
   retellAgentId             String?   // Retell agent ID (mirrors Retell's UI)
   retellSipAddress          String?   // Cached SIP URI, resolved from retellAgentId at campaign save
   createdById        String?
-  createdBy          User?             @relation(fields: [createdById], references: [id])
+  createdBy          Profile?          @relation(fields: [createdById], references: [id])
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
