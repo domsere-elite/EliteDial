@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import http from 'node:http';
-import jwt from 'jsonwebtoken';
+import { createRemoteJWKSet, jwtVerify, JWTVerifyGetKey } from 'jose';
 import { prisma } from './prisma';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -20,6 +20,18 @@ interface SocketUser {
     role: string;
     firstName: string;
     lastName: string;
+}
+
+let _jwks: JWTVerifyGetKey | null = null;
+function jwks(): JWTVerifyGetKey {
+    if (_jwks) return _jwks;
+    if (!config.supabase.url) {
+        throw new Error('SUPABASE_URL must be set to verify Supabase JWTs');
+    }
+    _jwks = createRemoteJWKSet(
+        new URL(`${config.supabase.url}/auth/v1/.well-known/jwks.json`),
+    );
+    return _jwks;
 }
 
 /**
@@ -49,10 +61,8 @@ export function setupSocketIO(server: http.Server): SocketIOServer {
 
             let claims: SupabaseJwtClaims;
             try {
-                claims = jwt.verify(token, config.supabase.jwtSecret, {
-                    algorithms: ['HS256'],
-                    audience: 'authenticated',
-                }) as SupabaseJwtClaims;
+                const { payload } = await jwtVerify(token, jwks(), { audience: 'authenticated' });
+                claims = payload as unknown as SupabaseJwtClaims;
             } catch {
                 return next(new Error('Invalid or expired token'));
             }

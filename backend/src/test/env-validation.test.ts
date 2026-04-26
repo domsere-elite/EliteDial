@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkBootEnv } from '../lib/env-validation';
 
-const supabaseOk = { url: 'https://x.supabase.co', jwtSecret: 'jwt', serviceRoleKey: 'srk' };
+const supabaseOk = { url: 'https://x.supabase.co', serviceRoleKey: 'srk' };
 
 test('env-validation: all empty (except supabase) → ok=true (mock mode boots)', () => {
     const r = checkBootEnv({
@@ -47,26 +47,25 @@ test('env-validation: full config → ok=true, no warnings', () => {
     assert.equal(r.warnings.length, 0);
 });
 
-test('env-validation: missing SUPABASE_JWT_SECRET → ok=false with explicit error', () => {
+test('env-validation: missing SUPABASE_SERVICE_ROLE_KEY → ok=false with explicit error', () => {
     const r = checkBootEnv({
         signalwire: { projectId: '', apiToken: '', spaceUrl: '' },
         retell: { apiKey: '' },
-        supabase: { url: 'https://x.supabase.co', jwtSecret: '', serviceRoleKey: 'srk' },
+        supabase: { url: 'https://x.supabase.co', serviceRoleKey: '' },
     });
     assert.equal(r.ok, false);
-    assert.ok(r.errors.some(e => /Missing required Supabase env vars.*SUPABASE_JWT_SECRET/.test(e)));
+    assert.ok(r.errors.some(e => /Missing required Supabase env vars.*SUPABASE_SERVICE_ROLE_KEY/.test(e)));
 });
 
-test('env-validation: all Supabase vars missing → single error listing all three', () => {
+test('env-validation: all Supabase vars missing → single error listing all required', () => {
     const r = checkBootEnv({
         signalwire: { projectId: '', apiToken: '', spaceUrl: '' },
         retell: { apiKey: '' },
-        supabase: { url: '', jwtSecret: '', serviceRoleKey: '' },
+        supabase: { url: '', serviceRoleKey: '' },
     });
     assert.equal(r.ok, false);
     const supaErr = r.errors.find(e => e.startsWith('Missing required Supabase'));
     assert.ok(supaErr);
     assert.match(supaErr!, /SUPABASE_URL/);
-    assert.match(supaErr!, /SUPABASE_JWT_SECRET/);
     assert.match(supaErr!, /SUPABASE_SERVICE_ROLE_KEY/);
 });

@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 export interface BootEnvSnapshot {
     signalwire: { projectId: string; apiToken: string; spaceUrl: string };
     retell: { apiKey: string };
-    supabase: { url: string; jwtSecret: string; serviceRoleKey: string };
+    supabase: { url: string; serviceRoleKey: string };
 }
 
 export interface BootEnvCheck {
@@ -34,7 +34,6 @@ export function checkBootEnv(snap: BootEnvSnapshot): BootEnvCheck {
 
     const missingSupabase: string[] = [];
     if (!snap.supabase.url) missingSupabase.push('SUPABASE_URL');
-    if (!snap.supabase.jwtSecret) missingSupabase.push('SUPABASE_JWT_SECRET');
     if (!snap.supabase.serviceRoleKey) missingSupabase.push('SUPABASE_SERVICE_ROLE_KEY');
     if (missingSupabase.length) {
         errors.push(`Missing required Supabase env vars: ${missingSupabase.join(', ')}`);
@@ -53,7 +52,6 @@ export function validateEnvOrExit(): void {
         retell: { apiKey: config.retell.apiKey },
         supabase: {
             url: config.supabase.url,
-            jwtSecret: config.supabase.jwtSecret,
             serviceRoleKey: config.supabase.serviceRoleKey,
         },
     });

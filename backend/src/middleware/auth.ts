@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
-import jwt from 'jsonwebtoken';
+import { createRemoteJWKSet, jwtVerify, JWTVerifyGetKey } from 'jose';
 import { prisma } from '../lib/prisma';
 import { config } from '../config';
 
@@ -30,6 +30,21 @@ interface SupabaseJwtClaims {
 
 export interface AuthDeps {
     profileLookup?: (id: string) => Promise<AuthenticatedUser | null>;
+    // Caller can inject a custom JWKS resolver (used in tests). Defaults to
+    // a remote JWKS bound to the Supabase project URL.
+    jwks?: JWTVerifyGetKey;
+}
+
+let _defaultJwks: JWTVerifyGetKey | null = null;
+function defaultJwks(): JWTVerifyGetKey {
+    if (_defaultJwks) return _defaultJwks;
+    if (!config.supabase.url) {
+        throw new Error('SUPABASE_URL must be set to verify Supabase JWTs');
+    }
+    _defaultJwks = createRemoteJWKSet(
+        new URL(`${config.supabase.url}/auth/v1/.well-known/jwks.json`),
+    );
+    return _defaultJwks;
 }
 
 function authenticateImpl(deps: AuthDeps = {}): RequestHandler {
@@ -49,10 +64,9 @@ function authenticateImpl(deps: AuthDeps = {}): RequestHandler {
         const token = header.slice(7);
         let claims: SupabaseJwtClaims;
         try {
-            claims = jwt.verify(token, config.supabase.jwtSecret, {
-                algorithms: ['HS256'],
-                audience: 'authenticated',
-            }) as SupabaseJwtClaims;
+            const jwks = deps.jwks ?? defaultJwks();
+            const { payload } = await jwtVerify(token, jwks, { audience: 'authenticated' });
+            claims = payload as unknown as SupabaseJwtClaims;
         } catch {
             res.status(401).json({ error: 'Invalid or expired token' });
             return;
@@ -74,11 +88,10 @@ function authenticateImpl(deps: AuthDeps = {}): RequestHandler {
     };
 }
 
-// Drop-in middleware that uses real Prisma. Compatible with all existing
-// `app.use(authenticate)` / `router.get(..., authenticate, ...)` callsites.
+// Drop-in middleware that uses the project's remote JWKS + real Prisma.
 export const authenticate: RequestHandler = authenticateImpl();
 
-// Used by tests to inject a stubbed profile lookup.
+// Used by tests to inject a stubbed profile lookup and/or a synthetic JWKS.
 export const buildAuthenticate = authenticateImpl;
 
 export async function authenticateApiKey(req: Request, res: Response, next: NextFunction): Promise<void> {
