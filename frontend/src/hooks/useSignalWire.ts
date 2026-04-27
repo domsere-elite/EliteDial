@@ -242,16 +242,30 @@ export function useSignalWire() {
             error: '',
         }));
 
+        // eslint-disable-next-line no-console
+        console.log('[SW-DIAL] client.dial → address:', sessionResp.resourceAddress);
         try {
             const room = await client.dial({
                 to: sessionResp.resourceAddress,
                 audio: true,
                 video: false,
             }) as FabricRoomSession;
+            // eslint-disable-next-line no-console
+            console.log('[SW-DIAL] dial returned room session, attaching events');
             activeCallRef.current = room;
             wireRoomEvents(room, backendCallId);
+            room.on('call.state', (s: unknown) => {
+                // eslint-disable-next-line no-console
+                console.log('[SW-DIAL] call.state →', s);
+            });
+            room.on('destroy', () => {
+                // eslint-disable-next-line no-console
+                console.log('[SW-DIAL] destroy');
+            });
         } catch (err) {
             const message = err instanceof Error ? err.message : 'SignalWire dial failed';
+            // eslint-disable-next-line no-console
+            console.error('[SW-DIAL] threw:', err);
             void pushBrowserStatus(backendCallId, { relayState: 'failed', details: { reason: message } });
             cleanupActive();
             setState((prev) => ({ ...prev, error: message }));

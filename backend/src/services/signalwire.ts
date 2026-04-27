@@ -268,7 +268,10 @@ export class SignalWireService implements TelephonyProvider {
         if (!this.isConfigured) return null;
 
         const name = `agent-dial-${agentReference}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 64);
-        const address = `/private/${name}?channel=audio`;
+        // No ?channel=audio — client.dial() picks the channel from the
+        // audio/video flags. Including the query string here causes the
+        // SDK to silently fail to open the media leg.
+        const address = `/private/${name}`;
 
         const listResp = await this.fetchImpl(
             `${this.baseUrl}/api/fabric/resources?page_size=200`,
