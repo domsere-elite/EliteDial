@@ -26,13 +26,37 @@ interface SignalWireState {
 
 interface DialResult {
     callId: string;
+    providerCallId?: string;
     fromNumber?: string;
+}
+
+interface PendingOutbound {
+    backendCallId: string;
+    providerCallId: string;
+    toNumber: string;
+    fromNumber?: string;
+    placedAt: number;
 }
 
 type CallStateEventParams = { call_state?: string; call_id?: string };
 
 const isCallStateParams = (value: unknown): value is CallStateEventParams =>
     typeof value === 'object' && value !== null;
+
+const inviteMatchesPending = (
+    details: Record<string, string | undefined>,
+    pending: PendingOutbound | null,
+): boolean => {
+    if (!pending) return false;
+    const providerCallId = pending.providerCallId;
+    const candidates = [details.call_id, details.call_sid, details.sip_call_id, details.parent_call_id]
+        .filter((v): v is string => Boolean(v));
+    if (candidates.some((id) => id === providerCallId)) return true;
+    // Fallback: SignalWire SIP invite to a subscriber may not echo the originating call_id.
+    // Treat any invite arriving within 15s of an outbound origination as our outbound continuation.
+    const ageMs = Date.now() - pending.placedAt;
+    return ageMs < 15000;
+};
 
 export function useSignalWire() {
     const [state, setState] = useState<SignalWireState>({
@@ -52,6 +76,7 @@ export function useSignalWire() {
     const activeCallRef = useRef<FabricRoomSession | null>(null);
     const activeBackendCallIdRef = useRef<string | null>(null);
     const pendingInviteRef = useRef<IncomingCallNotification | null>(null);
+    const pendingOutboundRef = useRef<PendingOutbound | null>(null);
 
     const pushBrowserStatus = useCallback(async (callId: string, payload: {
         providerCallId?: string;
@@ -69,6 +94,7 @@ export function useSignalWire() {
     const cleanupActive = useCallback(() => {
         activeCallRef.current = null;
         activeBackendCallIdRef.current = null;
+        pendingOutboundRef.current = null;
         setState((prev) => ({
             ...prev,
             onCall: false,
@@ -131,8 +157,38 @@ export function useSignalWire() {
             const client = await SignalWire({ token });
             await client.online({
                 incomingCallHandlers: {
-                    all: (notification) => {
+                    all: async (notification) => {
                         const details = notification.invite.details as unknown as Record<string, string | undefined>;
+                        const pending = pendingOutboundRef.current;
+
+                        if (inviteMatchesPending(details, pending) && pending) {
+                            // This SIP invite is the agent leg of an outbound we just placed.
+                            // Auto-accept silently — no UI prompt.
+                            pendingOutboundRef.current = null;
+                            try {
+                                const session = await notification.invite.accept({ audio: true, video: false, negotiateVideo: false });
+                                activeCallRef.current = session;
+                                activeBackendCallIdRef.current = pending.backendCallId;
+                                wireRoomEvents(session, pending.backendCallId);
+                                setState((prev) => ({
+                                    ...prev,
+                                    onCall: false,
+                                    ringing: true,
+                                    incomingCall: null,
+                                    callId: pending.backendCallId,
+                                    providerCallId: pending.providerCallId,
+                                    currentNumber: pending.toNumber,
+                                    error: '',
+                                }));
+                            } catch (err) {
+                                const message = err instanceof Error ? err.message : 'Unable to attach to outbound leg';
+                                void pushBrowserStatus(pending.backendCallId, { relayState: 'failed', details: { reason: message } });
+                                setState((prev) => ({ ...prev, ringing: false, error: message }));
+                            }
+                            return;
+                        }
+
+                        // Genuine inbound call → surface to UI for accept/reject.
                         pendingInviteRef.current = notification;
                         setState((prev) => ({
                             ...prev,
@@ -164,52 +220,54 @@ export function useSignalWire() {
         if (!clientRef.current) {
             await connect();
         }
-        const client = clientRef.current;
-        if (!client) {
+        if (!clientRef.current) {
             setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
             return null;
         }
 
-        // 1. Server-side compliance gate + DB record
-        let sessionResp: { callId: string; fromNumber?: string };
+        // Server originates the call: SignalWire dials the agent's SIP first (this browser),
+        // then SWML bridges that leg to the PSTN destination. The agent's SDK will receive
+        // a SIP invite via incomingCallHandlers; the handler auto-accepts when it matches
+        // pendingOutboundRef. We do NOT call client.dial — Fabric's client.dial is for
+        // subscriber-to-subscriber addresses, not bare PSTN E.164.
+        let sessionResp: { callId: string; providerCallId?: string; fromNumber?: string };
         try {
             const { data } = await api.post('/calls/browser-session', { toNumber });
-            sessionResp = { callId: data.callId, fromNumber: data.fromNumber };
+            sessionResp = {
+                callId: data.callId,
+                providerCallId: data.providerCallId,
+                fromNumber: data.fromNumber,
+            };
         } catch (err) {
             const respErr = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
             setState((prev) => ({ ...prev, error: respErr || 'Failed to start outbound call' }));
             return null;
         }
 
+        if (!sessionResp.providerCallId) {
+            setState((prev) => ({ ...prev, error: 'Provider did not return a call identifier' }));
+            return null;
+        }
+
+        pendingOutboundRef.current = {
+            backendCallId: sessionResp.callId,
+            providerCallId: sessionResp.providerCallId,
+            toNumber,
+            fromNumber: sessionResp.fromNumber,
+            placedAt: Date.now(),
+        };
         activeBackendCallIdRef.current = sessionResp.callId;
         setState((prev) => ({
             ...prev,
             callId: sessionResp.callId,
+            providerCallId: sessionResp.providerCallId || null,
             currentNumber: toNumber,
             ringing: true,
             error: '',
         }));
 
-        // 2. SDK dial (browser-originated audio leg via Fabric)
-        try {
-            const room = await client.dial({
-                to: toNumber,
-                audio: true,
-                video: false,
-                negotiateVideo: false,
-            });
-            activeCallRef.current = room;
-            wireRoomEvents(room, sessionResp.callId);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unable to place outbound call';
-            void pushBrowserStatus(sessionResp.callId, { relayState: 'failed', details: { reason: message } });
-            cleanupActive();
-            setState((prev) => ({ ...prev, error: message }));
-            return null;
-        }
-
         return sessionResp;
-    }, [connect, wireRoomEvents, pushBrowserStatus, cleanupActive]);
+    }, [connect]);
 
     const acceptIncoming = useCallback(async () => {
         const invite = pendingInviteRef.current;

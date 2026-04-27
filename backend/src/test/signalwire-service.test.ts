@@ -143,6 +143,61 @@ test('signalwire-service: initiateOutboundCall serializes swmlQuery into URL', a
     assert.match(body.params.url, /from=%2B15551112222/);
 });
 
+test('originateAgentBrowserCall posts dial to=sip:<ref>@<space> and bridge URL with PSTN dest', async () => {
+    const fetchMock = mock.fn(async (url: string, init?: any) => {
+        assert.equal(url, 'https://test.signalwire.com/api/calling/calls');
+        const body = JSON.parse(init.body);
+        assert.equal(body.command, 'dial');
+        assert.equal(body.params.from, '+13467760336', 'from is the DID for caller-ID on PSTN leg');
+        assert.equal(body.params.to, 'sip:agent-uuid-1@test.signalwire.com', 'to is the agent SIP URI so the browser rings first');
+        assert.equal(body.params.caller_id, '+13467760336');
+        assert.match(body.params.url, /\/swml\/bridge\?/);
+        assert.match(body.params.url, /to=%2B18327979834/);
+        assert.match(body.params.url, /from=%2B13467760336/);
+        assert.match(body.params.status_url, /\/signalwire\/events\/call-status/);
+        return makeResponse(200, { id: 'sw-call-42' });
+    });
+
+    const svc = new SignalWireService(config, { fetch: fetchMock as unknown as typeof fetch });
+    const result = await svc.originateAgentBrowserCall({
+        agentSipReference: 'agent-uuid-1',
+        toNumber: '+18327979834',
+        callerIdNumber: '+13467760336',
+        callbackUrl: 'https://backend.test',
+    });
+
+    assert.ok(result, 'result returned');
+    assert.equal(result!.provider, 'signalwire');
+    assert.equal(result!.providerCallId, 'sw-call-42');
+    assert.equal(fetchMock.mock.calls.length, 1);
+});
+
+test('originateAgentBrowserCall returns null when REST origin fails', async () => {
+    const fetchMock = mock.fn(async () => makeResponse(422, { error: 'invalid_target' }));
+    const svc = new SignalWireService(config, { fetch: fetchMock as unknown as typeof fetch });
+    const result = await svc.originateAgentBrowserCall({
+        agentSipReference: 'agent-uuid-1',
+        toNumber: '+18327979834',
+        callerIdNumber: '+13467760336',
+        callbackUrl: 'https://backend.test',
+    });
+    assert.equal(result, null);
+});
+
+test('originateAgentBrowserCall returns mock id when service unconfigured', async () => {
+    const fetchMock = mock.fn(async () => { throw new Error('should not be called'); });
+    const svc = new SignalWireService({ ...config, projectId: '' }, { fetch: fetchMock as unknown as typeof fetch });
+    const result = await svc.originateAgentBrowserCall({
+        agentSipReference: 'agent-uuid-1',
+        toNumber: '+18327979834',
+        callerIdNumber: '+13467760336',
+        callbackUrl: 'https://backend.test',
+    });
+    assert.ok(result);
+    assert.match(result!.providerCallId, /^mock-agent-call-/);
+    assert.equal(fetchMock.mock.calls.length, 0);
+});
+
 test('signalwire-service: initiateOutboundCall without swmlQuery falls back to to+from query', async () => {
     const fetchCalls: any[] = [];
     const fakeFetch = (async (url: string, init: any) => {

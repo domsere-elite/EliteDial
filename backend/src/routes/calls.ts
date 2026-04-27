@@ -427,6 +427,12 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
     }
 
     const callMode = 'manual';
+    const agentProfile = await prisma.profile.findUnique({
+        where: { id: req.user!.id },
+        select: { id: true, extension: true },
+    });
+    const agentSipReference = agentProfile?.extension || req.user!.id;
+
     const { call, session } = await callSessionService.createUnifiedCall({
         provider: 'signalwire',
         channel: 'human',
@@ -442,8 +448,9 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
         contactId: linkedContact?.id || null,
         leadExternalId: linkedContact?.externalId || null,
         providerMetadata: {
-            transport: 'relay-v2',
+            transport: 'fabric-sip',
             browserInitiated: true,
+            agentSipReference,
         },
         dncChecked: true,
         fdcpaNotice: true,
@@ -464,27 +471,81 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
         }
     }
 
+    const baseUrl = getBackendBaseUrl(req);
+    const originate = await signalwireService.originateAgentBrowserCall({
+        agentSipReference,
+        toNumber,
+        callerIdNumber: selectedFromNumber,
+        callbackUrl: baseUrl,
+    });
+
+    if (!originate?.providerCallId) {
+        await prisma.call.update({
+            where: { id: call.id },
+            data: { status: 'failed', completedAt: new Date() },
+        });
+        await callSessionService.syncCall(call.id, { status: 'failed' });
+
+        await callAuditService.track({
+            type: 'call.outbound.session_failed',
+            callId: call.id,
+            details: { toNumber, fromNumber: selectedFromNumber, agentSipReference, reason: 'originate_failed' },
+            source: 'api.calls.browser_session',
+            status: 'failed',
+        });
+
+        res.status(502).json({ error: 'Failed to originate outbound call with provider' });
+        return;
+    }
+
+    await callSessionService.attachProviderIdentifiers(call.id, {
+        provider: 'signalwire',
+        providerCallId: originate.providerCallId,
+        providerMetadata: originate.raw || undefined,
+    });
+    await prisma.call.update({
+        where: { id: call.id },
+        data: { status: 'ringing' },
+    });
+    await prisma.callSession.update({
+        where: { id: session.id },
+        data: { status: 'ringing', lastEventAt: new Date() },
+    });
+    await prisma.profile.update({ where: { id: req.user!.id }, data: { status: 'on-call' } });
+
     await callAuditService.track({
         type: 'call.outbound.session_created',
         callId: call.id,
+        callSid: originate.providerCallId,
         details: {
             toNumber,
             fromNumber: selectedFromNumber,
-            transport: 'relay-v2',
+            transport: 'fabric-sip',
+            agentSipReference,
             mode: callMode,
         },
         source: 'api.calls.browser_session',
-        status: 'initiated',
+        status: 'ringing',
+    });
+
+    logger.info('Browser-originated outbound call placed', {
+        callId: call.id,
+        providerCallId: originate.providerCallId,
+        agent: req.user!.email,
+        agentSipReference,
+        from: selectedFromNumber,
+        to: toNumber,
     });
 
     res.status(201).json({
         callId: call.id,
         callSessionId: session.id,
-        status: call.status,
+        providerCallId: originate.providerCallId,
+        status: 'ringing',
         fromNumber: selectedFromNumber,
         mode: callMode,
         provider: 'signalwire',
-        transport: 'relay-v2',
+        transport: 'fabric-sip',
     });
 });
 

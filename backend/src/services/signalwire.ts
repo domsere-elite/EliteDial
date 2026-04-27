@@ -158,6 +158,59 @@ export class SignalWireService implements TelephonyProvider {
         }
     }
 
+    async originateAgentBrowserCall(params: {
+        agentSipReference: string;
+        toNumber: string;
+        callerIdNumber: string;
+        callbackUrl: string;
+    }): Promise<OutboundCallResult | null> {
+        if (!this.isConfigured) {
+            logger.warn('SignalWire not configured; returning mock agent-call id');
+            return { provider: this.name, providerCallId: `mock-agent-call-${Date.now()}` };
+        }
+
+        try {
+            const queryString = new URLSearchParams([
+                ['to', params.toNumber],
+                ['from', params.callerIdNumber],
+            ]).toString();
+            const swmlUrl = `${params.callbackUrl}/swml/bridge?${queryString}`;
+            const statusUrl = `${params.callbackUrl}/signalwire/events/call-status`;
+            const sipTarget = `sip:${params.agentSipReference}@${this.spaceUrl}`;
+
+            const response = await this.fetchImpl(`${this.baseUrl}/api/calling/calls`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
+                body: JSON.stringify({
+                    command: 'dial',
+                    params: {
+                        from: params.callerIdNumber,
+                        to: sipTarget,
+                        caller_id: params.callerIdNumber,
+                        url: swmlUrl,
+                        status_url: statusUrl,
+                    },
+                }),
+            });
+
+            if (!response.ok) {
+                const bodyText = await response.text();
+                logger.error('SignalWire agent-browser call origination failed', { status: response.status, body: bodyText });
+                return null;
+            }
+
+            const data = (await response.json()) as { id?: string; call_id?: string };
+            return {
+                provider: this.name,
+                providerCallId: data.id || data.call_id || '',
+                raw: { sipTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber },
+            };
+        } catch (err) {
+            logger.error('SignalWire agent-browser call origination error', { error: err });
+            return null;
+        }
+    }
+
     async initiateOutboundCall(params: OutboundCallRequest): Promise<OutboundCallResult | null> {
         if (!this.isConfigured) {
             logger.warn('SignalWire not configured; returning mock call id');
