@@ -155,62 +155,71 @@ export function useSignalWire() {
             }
 
             const client = await SignalWire({ token });
-            await client.online({
-                incomingCallHandlers: {
-                    all: async (notification) => {
-                        const details = notification.invite.details as unknown as Record<string, string | undefined>;
-                        const pending = pendingOutboundRef.current;
 
-                        if (inviteMatchesPending(details, pending) && pending) {
-                            // This SIP invite is the agent leg of an outbound we just placed.
-                            // Auto-accept silently — no UI prompt.
-                            pendingOutboundRef.current = null;
-                            try {
-                                const session = await notification.invite.accept({ audio: true, video: false, negotiateVideo: false });
-                                activeCallRef.current = session;
-                                activeBackendCallIdRef.current = pending.backendCallId;
-                                wireRoomEvents(session, pending.backendCallId);
-                                setState((prev) => ({
-                                    ...prev,
-                                    onCall: false,
-                                    ringing: true,
-                                    incomingCall: null,
-                                    callId: pending.backendCallId,
-                                    providerCallId: pending.providerCallId,
-                                    currentNumber: pending.toNumber,
-                                    error: '',
-                                }));
-                            } catch (err) {
-                                const message = err instanceof Error ? err.message : 'Unable to attach to outbound leg';
-                                void pushBrowserStatus(pending.backendCallId, { relayState: 'failed', details: { reason: message } });
-                                setState((prev) => ({ ...prev, ringing: false, error: message }));
-                            }
-                            return;
-                        }
-
-                        // Genuine inbound call → surface to UI for accept/reject.
-                        pendingInviteRef.current = notification;
-                        setState((prev) => ({
-                            ...prev,
-                            incomingCall: {
-                                callerName: details.caller_id_name || 'Unknown Caller',
-                                callerNumber: details.caller_id_number || 'Unknown Number',
-                                callSid: details.call_sid || details.call_id || details.sip_call_id,
-                                toNumber: details.destination_number || details.to,
-                            },
-                            error: '',
-                        }));
-                    },
-                },
-            });
-
+            // The client is dial-capable as soon as SignalWire() resolves. Going
+            // online() is only required to receive incoming calls — outbound dial
+            // does not need it. Register the client and mark connected first so
+            // that a failure in online() (e.g. "WebRTC endpoint registration
+            // failed" when the subscriber is in a bad state) doesn't block
+            // outbound calling.
             clientRef.current = client;
-            // Manual-test hook: expose the connected client on window so we can
-            // run client.dial("/private/<resource>") from the browser console
-            // while validating the Fabric Resource architecture. Remove once
-            // the dynamic-destination design is in place.
             (window as unknown as { __sw?: SignalWireClient }).__sw = client;
             setState((prev) => ({ ...prev, connected: true, error: '' }));
+
+            try {
+                await client.online({
+                    incomingCallHandlers: {
+                        all: async (notification) => {
+                            const details = notification.invite.details as unknown as Record<string, string | undefined>;
+                            const pending = pendingOutboundRef.current;
+
+                            if (inviteMatchesPending(details, pending) && pending) {
+                                // This SIP invite is the agent leg of an outbound we just placed.
+                                // Auto-accept silently — no UI prompt.
+                                pendingOutboundRef.current = null;
+                                try {
+                                    const session = await notification.invite.accept({ audio: true, video: false, negotiateVideo: false });
+                                    activeCallRef.current = session;
+                                    activeBackendCallIdRef.current = pending.backendCallId;
+                                    wireRoomEvents(session, pending.backendCallId);
+                                    setState((prev) => ({
+                                        ...prev,
+                                        onCall: false,
+                                        ringing: true,
+                                        incomingCall: null,
+                                        callId: pending.backendCallId,
+                                        providerCallId: pending.providerCallId,
+                                        currentNumber: pending.toNumber,
+                                        error: '',
+                                    }));
+                                } catch (err) {
+                                    const message = err instanceof Error ? err.message : 'Unable to attach to outbound leg';
+                                    void pushBrowserStatus(pending.backendCallId, { relayState: 'failed', details: { reason: message } });
+                                    setState((prev) => ({ ...prev, ringing: false, error: message }));
+                                }
+                                return;
+                            }
+
+                            // Genuine inbound call → surface to UI for accept/reject.
+                            pendingInviteRef.current = notification;
+                            setState((prev) => ({
+                                ...prev,
+                                incomingCall: {
+                                    callerName: details.caller_id_name || 'Unknown Caller',
+                                    callerNumber: details.caller_id_number || 'Unknown Number',
+                                    callSid: details.call_sid || details.call_id || details.sip_call_id,
+                                    toNumber: details.destination_number || details.to,
+                                },
+                                error: '',
+                            }));
+                        },
+                    },
+                });
+            } catch (onlineErr) {
+                // Non-fatal: outbound still works. Log so it's visible in DevTools.
+                // eslint-disable-next-line no-console
+                console.warn('SignalWire client.online() failed — incoming calls will not ring this browser. Outbound dial unaffected.', onlineErr);
+            }
         } catch (err) {
             const responseStatus = (err as { response?: { status?: number; data?: { error?: string } } })?.response?.status;
             const responseError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
