@@ -202,6 +202,11 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
 
     // POST /swml/bridge
     router.post('/bridge', async (req: Request, res: Response): Promise<void> => {
+        // Diagnostic log for Fabric Resource → SWML handler shape discovery.
+        // Reveals where userVariables from client.dial() lands in the POST body
+        // (vars / params / user_variables / elsewhere). Remove once design is locked.
+        logger.info('swml.bridge invoked', { query: req.query, body: req.body });
+
         const mode = (req.query.mode as string) || '';
         const from = (req.query.from as string) || '';
 

@@ -205,6 +205,11 @@ export function useSignalWire() {
             });
 
             clientRef.current = client;
+            // Manual-test hook: expose the connected client on window so we can
+            // run client.dial("/private/<resource>") from the browser console
+            // while validating the Fabric Resource architecture. Remove once
+            // the dynamic-destination design is in place.
+            (window as unknown as { __sw?: SignalWireClient }).__sw = client;
             setState((prev) => ({ ...prev, connected: true, error: '' }));
         } catch (err) {
             const responseStatus = (err as { response?: { status?: number; data?: { error?: string } } })?.response?.status;
