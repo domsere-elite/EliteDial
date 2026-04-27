@@ -259,6 +259,85 @@ export class SignalWireService implements TelephonyProvider {
         }
     }
 
+    // Get-or-create a SWML script Resource the agent's browser will dial as a Fabric
+    // address. We keep one Resource per agent; the inline SWML is rewritten before
+    // each call (see updateAgentDialResource) to point at that call's destination.
+    //
+    // Resource address shape: /private/<name>?channel=audio
+    async ensureAgentDialResource(agentReference: string): Promise<{ resourceId: string; address: string } | null> {
+        if (!this.isConfigured) return null;
+
+        const name = `agent-dial-${agentReference}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 64);
+        const address = `/private/${name}?channel=audio`;
+
+        const listResp = await this.fetchImpl(
+            `${this.baseUrl}/api/fabric/resources?page_size=200`,
+            { headers: { Authorization: this.authHeader } },
+        );
+        if (listResp.ok) {
+            const listData = (await listResp.json()) as { data?: Array<{ id: string; type: string; display_name: string }> };
+            const existing = (listData.data || []).find(r => r.type === 'swml_script' && r.display_name === name);
+            if (existing) return { resourceId: existing.id, address };
+        }
+
+        const createResp = await this.fetchImpl(
+            `${this.baseUrl}/api/fabric/resources/swml_scripts`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
+                body: JSON.stringify({
+                    name,
+                    contents: { version: '1.0.0', sections: { main: [{ hangup: {} }] } },
+                }),
+            },
+        );
+        if (!createResp.ok) {
+            const bodyText = await createResp.text();
+            logger.error('SignalWire ensureAgentDialResource create failed', { status: createResp.status, body: bodyText, name });
+            return null;
+        }
+        const created = (await createResp.json()) as { id: string };
+        return { resourceId: created.id, address };
+    }
+
+    // Rewrite the agent's dial Resource so the next dial connects audio to a specific
+    // PSTN number. Browser dials the Resource address; SignalWire executes this SWML
+    // and bridges the browser leg to the PSTN leg.
+    async updateAgentDialResource(resourceId: string, params: { to: string; from: string; name: string }): Promise<boolean> {
+        if (!this.isConfigured) return false;
+        const swml = {
+            version: '1.0.0',
+            sections: {
+                main: [
+                    { answer: {} },
+                    {
+                        connect: {
+                            to: params.to,
+                            from: params.from,
+                            timeout: 30,
+                            answer_on_bridge: true,
+                        },
+                    },
+                    { hangup: {} },
+                ],
+            },
+        };
+        const resp = await this.fetchImpl(
+            `${this.baseUrl}/api/fabric/resources/swml_scripts/${resourceId}`,
+            {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
+                body: JSON.stringify({ name: params.name, contents: swml }),
+            },
+        );
+        if (!resp.ok) {
+            const bodyText = await resp.text();
+            logger.error('SignalWire updateAgentDialResource failed', { status: resp.status, body: bodyText, resourceId });
+            return false;
+        }
+        return true;
+    }
+
     // Pattern A: POST /api/calling/calls with {command: "update", call_id, params: {url}}.
     // Verified by unit test; awaiting live integration check (no SignalWire creds in dev).
     // If Pattern A fails against a live account, switch to pattern B:

@@ -471,42 +471,31 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
         }
     }
 
-    const baseUrl = getBackendBaseUrl(req);
-    const originate = await signalwireService.originateAgentBrowserCall({
-        agentSipReference,
-        toNumber,
-        callerIdNumber: selectedFromNumber,
-        callbackUrl: baseUrl,
-    });
-
-    if (!originate?.providerCallId) {
-        await prisma.call.update({
-            where: { id: call.id },
-            data: { status: 'failed', completedAt: new Date() },
-        });
+    // Fabric Resource pattern: get-or-create a per-agent SWML Resource, rewrite its
+    // contents to bridge to this specific destination, then return the Resource's
+    // Fabric address. Frontend dials that address with client.dial() — SignalWire
+    // executes the inline SWML and bridges browser audio to the PSTN leg.
+    const ensured = await signalwireService.ensureAgentDialResource(agentSipReference);
+    if (!ensured) {
+        await prisma.call.update({ where: { id: call.id }, data: { status: 'failed', completedAt: new Date() } });
         await callSessionService.syncCall(call.id, { status: 'failed' });
-
-        await callAuditService.track({
-            type: 'call.outbound.session_failed',
-            callId: call.id,
-            details: { toNumber, fromNumber: selectedFromNumber, agentSipReference, reason: 'originate_failed' },
-            source: 'api.calls.browser_session',
-            status: 'failed',
-        });
-
-        res.status(502).json({ error: 'Failed to originate outbound call with provider' });
+        res.status(502).json({ error: 'Failed to provision SignalWire Resource for outbound dial' });
         return;
     }
 
-    await callSessionService.attachProviderIdentifiers(call.id, {
-        provider: 'signalwire',
-        providerCallId: originate.providerCallId,
-        providerMetadata: originate.raw || undefined,
+    const updated = await signalwireService.updateAgentDialResource(ensured.resourceId, {
+        to: toNumber,
+        from: selectedFromNumber,
+        name: `agent-dial-${agentSipReference}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 64),
     });
-    await prisma.call.update({
-        where: { id: call.id },
-        data: { status: 'ringing' },
-    });
+    if (!updated) {
+        await prisma.call.update({ where: { id: call.id }, data: { status: 'failed', completedAt: new Date() } });
+        await callSessionService.syncCall(call.id, { status: 'failed' });
+        res.status(502).json({ error: 'Failed to configure SignalWire Resource for this destination' });
+        return;
+    }
+
+    await prisma.call.update({ where: { id: call.id }, data: { status: 'ringing' } });
     await prisma.callSession.update({
         where: { id: session.id },
         data: { status: 'ringing', lastEventAt: new Date() },
@@ -516,23 +505,24 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
     await callAuditService.track({
         type: 'call.outbound.session_created',
         callId: call.id,
-        callSid: originate.providerCallId,
         details: {
             toNumber,
             fromNumber: selectedFromNumber,
-            transport: 'fabric-sip',
+            transport: 'fabric-resource',
             agentSipReference,
+            resourceId: ensured.resourceId,
             mode: callMode,
         },
         source: 'api.calls.browser_session',
         status: 'ringing',
     });
 
-    logger.info('Browser-originated outbound call placed', {
+    logger.info('Browser-originated outbound call: Resource configured', {
         callId: call.id,
-        providerCallId: originate.providerCallId,
         agent: req.user!.email,
         agentSipReference,
+        resourceId: ensured.resourceId,
+        address: ensured.address,
         from: selectedFromNumber,
         to: toNumber,
     });
@@ -540,12 +530,12 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
     res.status(201).json({
         callId: call.id,
         callSessionId: session.id,
-        providerCallId: originate.providerCallId,
+        resourceAddress: ensured.address,
         status: 'ringing',
         fromNumber: selectedFromNumber,
         mode: callMode,
         provider: 'signalwire',
-        transport: 'fabric-sip',
+        transport: 'fabric-resource',
     });
 });
 

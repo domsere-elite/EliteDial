@@ -200,22 +200,29 @@ export function useSignalWire() {
         if (!clientRef.current) {
             await connect();
         }
-        if (!clientRef.current) {
+        const client = clientRef.current;
+        if (!client) {
             setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
             return null;
         }
 
-        // Server originates the call: SignalWire dials the agent's SIP first (this browser),
-        // then SWML bridges that leg to the PSTN destination. The agent's SDK will receive
-        // a SIP invite via incomingCallHandlers; the handler auto-accepts when it matches
-        // pendingOutboundRef. We do NOT call client.dial — Fabric's client.dial is for
-        // subscriber-to-subscriber addresses, not bare PSTN E.164.
-        let sessionResp: { callId: string; providerCallId?: string; fromNumber?: string };
+        // Backend creates/updates a SWML Resource configured to connect to this
+        // specific destination, then returns its Fabric address (e.g.
+        // "/private/agent-dial-XYZ?channel=audio"). We dial that address; the
+        // SDK opens a WebRTC media path to SignalWire which executes the
+        // Resource's SWML and bridges to the PSTN destination. No backend
+        // origination, no SIP invite to the browser, no incomingCallHandlers
+        // dependency.
+        let sessionResp: { callId: string; resourceAddress: string; fromNumber?: string };
         try {
             const { data } = await api.post('/calls/browser-session', { toNumber });
+            if (!data?.resourceAddress) {
+                setState((prev) => ({ ...prev, error: 'Backend did not provide a Fabric resource address' }));
+                return null;
+            }
             sessionResp = {
                 callId: data.callId,
-                providerCallId: data.providerCallId,
+                resourceAddress: data.resourceAddress,
                 fromNumber: data.fromNumber,
             };
         } catch (err) {
@@ -224,30 +231,39 @@ export function useSignalWire() {
             return null;
         }
 
-        if (!sessionResp.providerCallId) {
-            setState((prev) => ({ ...prev, error: 'Provider did not return a call identifier' }));
-            return null;
-        }
-
-        pendingOutboundRef.current = {
-            backendCallId: sessionResp.callId,
-            providerCallId: sessionResp.providerCallId,
-            toNumber,
-            fromNumber: sessionResp.fromNumber,
-            placedAt: Date.now(),
-        };
-        activeBackendCallIdRef.current = sessionResp.callId;
+        const backendCallId = sessionResp.callId;
+        activeBackendCallIdRef.current = backendCallId;
         setState((prev) => ({
             ...prev,
-            callId: sessionResp.callId,
-            providerCallId: sessionResp.providerCallId || null,
+            callId: backendCallId,
+            providerCallId: null,
             currentNumber: toNumber,
             ringing: true,
             error: '',
         }));
 
-        return sessionResp;
-    }, [connect]);
+        try {
+            const room = await client.dial({
+                to: sessionResp.resourceAddress,
+                audio: true,
+                video: false,
+            }) as FabricRoomSession;
+            activeCallRef.current = room;
+            wireRoomEvents(room, backendCallId);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'SignalWire dial failed';
+            void pushBrowserStatus(backendCallId, { relayState: 'failed', details: { reason: message } });
+            cleanupActive();
+            setState((prev) => ({ ...prev, error: message }));
+            return null;
+        }
+
+        return {
+            callId: backendCallId,
+            providerCallId: undefined,
+            fromNumber: sessionResp.fromNumber,
+        };
+    }, [connect, cleanupActive, pushBrowserStatus, wireRoomEvents]);
 
     const acceptIncoming = useCallback(async () => {
         const invite = pendingInviteRef.current;
