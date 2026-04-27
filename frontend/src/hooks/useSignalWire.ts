@@ -242,6 +242,40 @@ export function useSignalWire() {
             error: '',
         }));
 
+        // Ensure mic permission is granted and AudioContext is unsuspended
+        // BEFORE invoking client.dial. Both are user-gesture-gated in the
+        // browser; without them client.dial returns a session that never
+        // negotiates media and the SWML connect step on SignalWire's side
+        // never runs.
+        try {
+            const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+            // eslint-disable-next-line no-console
+            console.log('[SW-DIAL] AudioContext state before resume:', audioCtx.state);
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+                // eslint-disable-next-line no-console
+                console.log('[SW-DIAL] AudioContext resumed, state:', audioCtx.state);
+            }
+        } catch (e) {
+            // eslint-disable-next-line no-console
+            console.warn('[SW-DIAL] AudioContext resume failed:', e);
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // eslint-disable-next-line no-console
+            console.log('[SW-DIAL] mic permission OK, tracks:', stream.getAudioTracks().map(t => t.label));
+            stream.getTracks().forEach(t => t.stop()); // release; SDK will request its own
+        } catch (e) {
+            const message = e instanceof Error ? e.message : 'Microphone permission denied';
+            // eslint-disable-next-line no-console
+            console.error('[SW-DIAL] mic permission failed:', e);
+            void pushBrowserStatus(backendCallId, { relayState: 'failed', details: { reason: 'mic_permission_denied' } });
+            cleanupActive();
+            setState((prev) => ({ ...prev, error: 'Microphone access required: ' + message }));
+            return null;
+        }
+
         // eslint-disable-next-line no-console
         console.log('[SW-DIAL] client.dial → address:', sessionResp.resourceAddress);
         try {
@@ -251,7 +285,7 @@ export function useSignalWire() {
                 video: false,
             }) as FabricRoomSession;
             // eslint-disable-next-line no-console
-            console.log('[SW-DIAL] dial returned room session, attaching events');
+            console.log('[SW-DIAL] dial returned room session, attaching events. roomId:', (room as unknown as { id?: string }).id, 'roomState:', (room as unknown as { state?: string }).state);
             activeCallRef.current = room;
             wireRoomEvents(room, backendCallId);
             room.on('call.state', (s: unknown) => {
@@ -262,6 +296,16 @@ export function useSignalWire() {
                 // eslint-disable-next-line no-console
                 console.log('[SW-DIAL] destroy');
             });
+            (window as unknown as { __lastRoom?: unknown }).__lastRoom = room;
+            // Periodic state poll for 30s, in case events are lost
+            let ticks = 0;
+            const stateInterval = setInterval(() => {
+                ticks += 1;
+                const s = (room as unknown as { state?: string }).state;
+                // eslint-disable-next-line no-console
+                console.log('[SW-DIAL] periodic poll', ticks, 'state:', s);
+                if (ticks >= 6) clearInterval(stateInterval);
+            }, 5000);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'SignalWire dial failed';
             // eslint-disable-next-line no-console
