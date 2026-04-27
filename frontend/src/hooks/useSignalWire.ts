@@ -216,9 +216,17 @@ export function useSignalWire() {
                     },
                 });
             } catch (onlineErr) {
-                // Non-fatal: outbound still works. Log so it's visible in DevTools.
+                // Non-fatal: outbound still works. Render the error as plain JSON
+                // so the actual reason (code/message) is readable in the console
+                // without needing to expand a DevTools object.
+                let asText: string;
+                try {
+                    asText = JSON.stringify(onlineErr, Object.getOwnPropertyNames(onlineErr as object), 2);
+                } catch {
+                    asText = String(onlineErr);
+                }
                 // eslint-disable-next-line no-console
-                console.warn('SignalWire client.online() failed — incoming calls will not ring this browser. Outbound dial unaffected.', onlineErr);
+                console.warn('[SW-ONLINE-FAIL]', asText);
             }
         } catch (err) {
             const responseStatus = (err as { response?: { status?: number; data?: { error?: string } } })?.response?.status;
