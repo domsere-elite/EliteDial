@@ -14,6 +14,7 @@ import { getBackendBaseUrl } from '../utils/backend-url';
 import { signalwireService } from '../services/signalwire';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { isWithinCallingWindow, getContactTimezone } from '../services/tcpa';
+import { broadcastCallStatus } from '../lib/realtime';
 import {
     validate, initiateCallSchema, browserSessionSchema, browserStatusSchema,
     dispositionSchema, transferSchema, simulateInboundSchema, inboundAttachSchema,
@@ -600,6 +601,14 @@ router.post('/:id/browser-status', authenticate, validate(browserStatusSchema), 
             account_id: existing.accountId || null,
         });
     }
+
+    broadcastCallStatus({
+        callId,
+        status: mappedStatus,
+        agentId: existing.agentId || undefined,
+        providerCallId: providerCallId || existing.providerCallId || undefined,
+        duration: typeof duration === 'number' ? duration : undefined,
+    });
 
     res.json({
         ok: true,

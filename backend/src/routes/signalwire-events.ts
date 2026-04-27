@@ -7,6 +7,7 @@ import { crmAdapter } from '../services/crm-adapter';
 import { campaignReservationService } from '../services/campaign-reservation-service';
 import { logger } from '../utils/logger';
 import { eventBus } from '../lib/event-bus';
+import { broadcastCallStatus } from '../lib/realtime';
 
 const SIGNALWIRE_STATE_MAP: Record<string, string> = {
     queued: 'initiated',
@@ -237,6 +238,16 @@ export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaul
             await deps.dispatchWebhook('call.answered', { callId: call_id, status: mappedStatus });
         } else if (mappedStatus === 'completed') {
             await deps.dispatchWebhook('call.completed', { callId: call_id, status: mappedStatus, duration: durationSec });
+        }
+
+        if (withAttempt?.id) {
+            broadcastCallStatus({
+                callId: withAttempt.id,
+                status: mappedStatus,
+                agentId: withAttempt.agentId || undefined,
+                providerCallId: call_id,
+                duration: durationSec,
+            });
         }
 
         res.status(200).json({ status: 'ok' });

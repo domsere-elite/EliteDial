@@ -97,31 +97,4 @@ router.get('/token/signalwire', authenticate, async (req: Request, res: Response
     res.json({ token: result.token, spaceUrl: process.env.SIGNALWIRE_SPACE_URL || '' });
 });
 
-router.get('/token/signalwire-relay', authenticate, async (req: Request, res: Response): Promise<void> => {
-    const user = await prisma.profile.findUnique({
-        where: { id: req.user!.id },
-        select: { id: true, email: true, extension: true },
-    });
-
-    if (!user) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-    }
-
-    const resource = user.extension || user.email || user.id;
-    const result = await signalwireService.generateRelayJwt(resource);
-    if (!result.token) {
-        res.status(500).json({ error: 'Failed to generate Relay JWT', reason: result.error || 'unknown' });
-        return;
-    }
-
-    res.json({
-        token: result.token,
-        projectId: process.env.SIGNALWIRE_PROJECT_ID || '',
-        spaceUrl: process.env.SIGNALWIRE_SPACE_URL || '',
-        resource,
-        transport: 'relay-v2',
-    });
-});
-
 export default router;

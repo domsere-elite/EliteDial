@@ -1,7 +1,9 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useCallTimer } from '@/hooks/useCallTimer';
+import { useSignalWire } from '@/hooks/useSignalWire';
+import { useRealtime } from '@/components/RealtimeProvider';
 import api from '@/lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -33,7 +35,22 @@ interface Disposition {
     label: string;
 }
 
-type CallState = 'idle' | 'ringing' | 'connected' | 'wrap-up';
+interface WrapUp {
+    callId: string;
+    fromNumber: string;
+    toNumber: string;
+    accountName?: string;
+    duration: number;
+    direction: 'inbound' | 'outbound';
+}
+
+type CallStatusEvent = {
+    callId: string;
+    status: string;
+    agentId?: string;
+    providerCallId?: string;
+    duration?: number;
+};
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -60,9 +77,9 @@ function fmtShortDate(iso: string): string {
 export default function DashboardPage() {
     const { user } = useAuth();
     const timer = useCallTimer();
+    const sw = useSignalWire();
+    const { on, off, connected: socketConnected } = useRealtime();
 
-    const [callState, setCallState] = useState<CallState>('idle');
-    const [activeCall, setActiveCall] = useState<CallRecord | null>(null);
     const [recentCalls, setRecentCalls] = useState<CallRecord[]>([]);
     const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
     const [crmData, setCrmData] = useState<CRMAccount | null>(null);
@@ -73,12 +90,23 @@ export default function DashboardPage() {
     const [dialPadOpen, setDialPadOpen] = useState(false);
     const [dialNumber, setDialNumber] = useState('');
     const [dialing, setDialing] = useState(false);
+    const [wrapUp, setWrapUp] = useState<WrapUp | null>(null);
+    const [transferTarget, setTransferTarget] = useState('');
+    const [transferring, setTransferring] = useState(false);
+
+    const wasOnCallRef = useRef(false);
+    const activeOutboundContextRef = useRef<{ toNumber: string; fromNumber: string } | null>(null);
+
+    /* ── Connect SDK on mount ─────────────────────────────────────── */
+    useEffect(() => {
+        sw.connect();
+    }, [sw]);
 
     /* ── Data fetching ─────────────────────────────────────────────── */
 
     const fetchRecentCalls = useCallback(async () => {
         try {
-            const { data } = await api.get('/calls', { params: { direction: 'inbound', limit: 15 } });
+            const { data } = await api.get('/calls', { params: { limit: 20 } });
             setRecentCalls(Array.isArray(data) ? data : data.calls ?? []);
         } catch { /* silent */ }
     }, []);
@@ -103,87 +131,133 @@ export default function DashboardPage() {
         }
     }, []);
 
-    // On mount: fetch recent calls + dispositions
     useEffect(() => {
         fetchRecentCalls();
         fetchDispositions();
     }, [fetchRecentCalls, fetchDispositions]);
 
-    // Poll recent calls every 15s
+    /* ── Real-time call status events ─────────────────────────────── */
     useEffect(() => {
-        const id = setInterval(fetchRecentCalls, 15_000);
-        return () => clearInterval(id);
-    }, [fetchRecentCalls]);
+        const handler = (..._args: unknown[]) => {
+            // any call status change should refresh recent list
+            void fetchRecentCalls();
+        };
+        on('call:status', handler);
+        return () => off('call:status', handler);
+    }, [on, off, fetchRecentCalls]);
 
-    // CRM lookup when active call changes or a call is selected
+    /* ── Detect call-end → enter wrap-up ───────────────────────────── */
     useEffect(() => {
-        const phone = activeCall?.fromNumber ?? selectedCall?.fromNumber;
+        if (sw.onCall) {
+            wasOnCallRef.current = true;
+            timer.start();
+            return;
+        }
+        if (wasOnCallRef.current && !sw.onCall && !sw.ringing && !sw.incomingCall) {
+            // Just transitioned out of an active call
+            const dur = timer.stop();
+            const callId = sw.callId;
+            const ctx = activeOutboundContextRef.current;
+            if (callId) {
+                setWrapUp({
+                    callId,
+                    fromNumber: ctx?.fromNumber || '',
+                    toNumber: ctx?.toNumber || sw.currentNumber,
+                    duration: dur,
+                    direction: ctx ? 'outbound' : 'inbound',
+                });
+            }
+            wasOnCallRef.current = false;
+            activeOutboundContextRef.current = null;
+            void fetchRecentCalls();
+        }
+    }, [sw.onCall, sw.ringing, sw.incomingCall, sw.callId, sw.currentNumber, timer, fetchRecentCalls]);
+
+    /* ── CRM lookup follows live call or selection ─────────────────── */
+    useEffect(() => {
+        const phone = sw.incomingCall?.callerNumber
+            || (sw.onCall || sw.ringing ? sw.currentNumber : null)
+            || selectedCall?.fromNumber
+            || null;
         if (phone) lookupCRM(phone);
         else setCrmData(null);
-    }, [activeCall?.fromNumber, selectedCall?.fromNumber, lookupCRM]);
+    }, [sw.incomingCall?.callerNumber, sw.onCall, sw.ringing, sw.currentNumber, selectedCall?.fromNumber, lookupCRM]);
 
-    /* ── Call actions (stubs — softphone wired later) ──────────────── */
+    /* ── Call actions ─────────────────────────────────────────────── */
 
-    const handleHangup = () => {
-        const dur = timer.stop();
-        if (activeCall) setActiveCall({ ...activeCall, duration: dur, status: 'completed' });
-        setCallState('wrap-up');
-    };
+    const handleAccept = async () => { await sw.acceptIncoming(); };
+    const handleReject = async () => { await sw.rejectIncoming(); };
+
+    const handleHangup = async () => { await sw.hangup(); };
 
     const handleDispositionSubmit = async () => {
-        if (!activeCall || !selectedDispositionId) return;
+        if (!wrapUp || !selectedDispositionId) return;
         try {
-            await api.post(`/calls/${activeCall.id}/disposition`, {
+            await api.post(`/calls/${wrapUp.callId}/disposition`, {
                 dispositionId: selectedDispositionId,
                 notes: dispositionNote,
             });
-        } catch { /* silent */ }
-        setCallState('idle');
-        setActiveCall(null);
+        } catch { /* user already saw the call go through; do not block UI on disposition save */ }
+        setWrapUp(null);
         setSelectedDispositionId('');
         setDispositionNote('');
-        fetchRecentCalls();
+        setTransferTarget('');
+        void fetchRecentCalls();
     };
 
     const handleOutboundDial = async () => {
-        if (!dialNumber.trim() || dialing) return;
+        const target = dialNumber.trim();
+        if (!target || dialing || wrapUp || sw.onCall || sw.ringing) return;
         setDialing(true);
         try {
-            const { data } = await api.post('/calls/initiate', {
-                toNumber: dialNumber.trim(),
-                mode: 'agent',
-            });
-            setActiveCall({
-                id: data.callId,
-                direction: 'outbound',
-                fromNumber: data.fromNumber || '',
-                toNumber: dialNumber.trim(),
-                status: 'ringing',
-                duration: 0,
-                createdAt: new Date().toISOString(),
-            });
-            setCallState('ringing');
-            timer.start();
-            setTimeout(() => {
-                setCallState('connected');
-            }, 2000);
-            setDialPadOpen(false);
-        } catch (err: any) {
-            const msg = err?.response?.data?.error || 'Call failed';
-            alert(msg);
+            const result = await sw.dial(target);
+            if (result?.callId) {
+                activeOutboundContextRef.current = {
+                    toNumber: target,
+                    fromNumber: result.fromNumber || '',
+                };
+                setDialPadOpen(false);
+                setDialNumber('');
+            }
         } finally {
             setDialing(false);
         }
     };
 
+    const handleTransfer = async () => {
+        if (!sw.callId || !transferTarget.trim() || transferring) return;
+        setTransferring(true);
+        try {
+            await api.post(`/calls/${sw.callId}/transfer`, {
+                targetNumber: transferTarget.trim(),
+                type: 'cold',
+            });
+            setTransferTarget('');
+        } catch { /* surfaced via the global error state in sw if needed */ } finally {
+            setTransferring(false);
+        }
+    };
+
     const pushDigit = (digit: string) => setDialNumber((n) => n + digit);
 
-    /* ── Derived data ──────────────────────────────────────────────── */
+    /* ── Derived UI state ─────────────────────────────────────────── */
 
-    const focusPhone = activeCall?.fromNumber ?? selectedCall?.fromNumber ?? null;
+    const phase: 'idle' | 'incoming' | 'outbound-ring' | 'connected' | 'wrap-up' =
+        wrapUp ? 'wrap-up'
+            : sw.incomingCall ? 'incoming'
+            : sw.onCall ? 'connected'
+            : sw.ringing ? 'outbound-ring'
+            : 'idle';
+
+    const dialDisabled = phase !== 'idle' || dialing || !dialNumber.trim();
+
+    const focusPhone = sw.incomingCall?.callerNumber
+        || (sw.onCall || sw.ringing ? sw.currentNumber : null)
+        || selectedCall?.fromNumber
+        || null;
 
     const callHistoryForPhone = focusPhone
-        ? recentCalls.filter((c) => c.fromNumber === focusPhone).slice(0, 5)
+        ? recentCalls.filter((c) => c.fromNumber === focusPhone || c.toNumber === focusPhone).slice(0, 5)
         : [];
 
     /* ── Render ─────────────────────────────────────────────────────── */
@@ -195,21 +269,28 @@ export default function DashboardPage() {
                 <div>
                     <h1 style={{ fontFamily: 'var(--font-headline)' }}>Inbound Hub</h1>
                     <p style={{ color: 'var(--text-muted)', marginTop: 4 }}>
-                        Receive calls and view account context.
+                        {sw.connected ? 'Softphone connected.' : sw.error || 'Connecting softphone...'}
+                        {socketConnected ? ' Real-time live.' : ' Real-time offline.'}
                     </p>
                 </div>
             </div>
+
+            {sw.error && (
+                <div className="notice notice-error" style={{ marginBottom: 12 }}>
+                    {sw.error}
+                </div>
+            )}
 
             {/* Collapsible Dial Pad */}
             <div className="glass-panel" style={{ padding: dialPadOpen ? 20 : '10px 16px', transition: 'padding 0.2s ease' }}>
                 <div
                     className="status-row"
                     style={{ cursor: 'pointer' }}
-                    onClick={() => callState === 'idle' && setDialPadOpen(!dialPadOpen)}
+                    onClick={() => phase === 'idle' && setDialPadOpen(!dialPadOpen)}
                 >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span className="nav-glyph" style={{ width: 24, height: 24, fontSize: '0.6rem' }}>
-                            {dialPadOpen ? '\u25B2' : '\u260E'}
+                            {dialPadOpen ? '▲' : '☎'}
                         </span>
                         <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>
                             {dialPadOpen ? 'Outbound Dial' : 'Make a Call'}
@@ -244,10 +325,10 @@ export default function DashboardPage() {
                             <button
                                 className="call-btn call-btn-dial"
                                 style={{ flex: 1 }}
-                                disabled={!dialNumber.trim() || dialing || callState !== 'idle'}
+                                disabled={dialDisabled}
                                 onClick={handleOutboundDial}
                             >
-                                {dialing ? 'Dialing...' : 'Call'}
+                                {dialing ? 'Dialing...' : phase === 'wrap-up' ? 'Submit disposition first' : 'Call'}
                             </button>
                             <button
                                 className="btn btn-secondary"
@@ -266,45 +347,108 @@ export default function DashboardPage() {
                 <div className="workspace-column">
                     {/* Active Call Card */}
                     <div className="glass-panel call-card-primary workspace-panel call-card">
-                        {callState === 'idle' ? (
+                        {phase === 'idle' && (
                             <div style={{ padding: '24px 0' }}>
                                 <p className="topline" style={{ marginBottom: 6 }}>STATUS</p>
                                 <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem' }}>
-                                    Waiting for inbound calls...
+                                    {sw.connected ? 'Idle. Waiting for inbound calls or place an outbound call.' : 'Connecting softphone...'}
                                 </p>
                             </div>
-                        ) : (
+                        )}
+
+                        {phase === 'incoming' && sw.incomingCall && (
                             <>
-                                <span className={`status-badge status-badge--${callState === 'ringing' ? 'warning' : callState === 'connected' ? 'success' : 'info'}`}>
-                                    {callState}
-                                </span>
+                                <span className="status-badge status-badge--warning">incoming</span>
                                 <p className="mono" style={{ fontSize: '1.6rem', letterSpacing: '-0.03em' }}>
-                                    {activeCall?.fromNumber ?? '\u2014'}
+                                    {sw.incomingCall.callerNumber}
                                 </p>
-                                {callState === 'connected' && (
-                                    <p className="call-timer">{timer.formatted}</p>
-                                )}
+                                <p style={{ color: 'var(--text-muted)' }}>{sw.incomingCall.callerName}</p>
                                 <div className="call-controls">
-                                    <button className="call-btn call-btn-hangup" onClick={handleHangup}>
-                                        Hang Up
-                                    </button>
-                                    <button className="call-control-btn">Hold</button>
-                                    <button className="call-control-btn">Mute</button>
+                                    <button className="call-btn call-btn-accept" onClick={handleAccept}>Accept</button>
+                                    <button className="call-btn call-btn-hangup" onClick={handleReject}>Reject</button>
                                 </div>
+                            </>
+                        )}
+
+                        {phase === 'outbound-ring' && (
+                            <>
+                                <span className="status-badge status-badge--warning">ringing</span>
+                                <p className="mono" style={{ fontSize: '1.6rem', letterSpacing: '-0.03em' }}>
+                                    {sw.currentNumber || '—'}
+                                </p>
+                                <p style={{ color: 'var(--text-muted)' }}>Connecting...</p>
+                                <div className="call-controls">
+                                    <button className="call-btn call-btn-hangup" onClick={handleHangup}>Cancel</button>
+                                </div>
+                            </>
+                        )}
+
+                        {phase === 'connected' && (
+                            <>
+                                <span className="status-badge status-badge--success">connected</span>
+                                <p className="mono" style={{ fontSize: '1.6rem', letterSpacing: '-0.03em' }}>
+                                    {sw.currentNumber || '—'}
+                                </p>
+                                <p className="call-timer">{timer.formatted}</p>
+                                <div className="call-controls">
+                                    <button className="call-btn call-btn-hangup" onClick={handleHangup}>Hang Up</button>
+                                    <button
+                                        className={`call-control-btn ${sw.held ? 'active' : ''}`}
+                                        onClick={() => sw.toggleHold()}
+                                    >
+                                        {sw.held ? 'Resume' : 'Hold'}
+                                    </button>
+                                    <button
+                                        className={`call-control-btn ${sw.muted ? 'active' : ''}`}
+                                        onClick={() => sw.toggleMute()}
+                                    >
+                                        {sw.muted ? 'Unmute' : 'Mute'}
+                                    </button>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                                    <input
+                                        type="text"
+                                        value={transferTarget}
+                                        onChange={(e) => setTransferTarget(e.target.value)}
+                                        placeholder="Cold transfer to..."
+                                        className="input"
+                                        style={{ flex: 1, fontSize: '0.9rem' }}
+                                    />
+                                    <button
+                                        className="btn btn-secondary"
+                                        disabled={!transferTarget.trim() || transferring}
+                                        onClick={handleTransfer}
+                                    >
+                                        {transferring ? 'Transferring...' : 'Transfer'}
+                                    </button>
+                                </div>
+                            </>
+                        )}
+
+                        {phase === 'wrap-up' && wrapUp && (
+                            <>
+                                <span className="status-badge status-badge--info">wrap-up</span>
+                                <p className="mono" style={{ fontSize: '1.4rem', letterSpacing: '-0.03em' }}>
+                                    {wrapUp.direction === 'outbound' ? wrapUp.toNumber : wrapUp.fromNumber}
+                                </p>
+                                <p style={{ color: 'var(--text-muted)' }}>
+                                    Call ended after {fmtDuration(wrapUp.duration)}. Submit disposition to take the next call.
+                                </p>
                             </>
                         )}
                     </div>
 
-                    {/* Recent Inbound Calls */}
+                    {/* Recent Calls */}
                     <div className="glass-panel workspace-panel" style={{ flex: 1, overflow: 'hidden' }}>
                         <div className="panel-heading">
-                            <h3>Recent Inbound Calls</h3>
+                            <h3>Recent Calls</h3>
                         </div>
                         <div style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 440px)' }}>
                             <table className="data-table">
                                 <thead>
                                     <tr>
-                                        <th>Caller</th>
+                                        <th>Dir</th>
+                                        <th>Number</th>
                                         <th>Account</th>
                                         <th>Status</th>
                                         <th>Dur</th>
@@ -314,27 +458,31 @@ export default function DashboardPage() {
                                 <tbody>
                                     {recentCalls.length === 0 && (
                                         <tr>
-                                            <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                                                No recent inbound calls
+                                            <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                                                No recent calls
                                             </td>
                                         </tr>
                                     )}
-                                    {recentCalls.map((call) => (
-                                        <tr
-                                            key={call.id}
-                                            onClick={() => setSelectedCall(call)}
-                                            style={{
-                                                cursor: 'pointer',
-                                                background: selectedCall?.id === call.id ? 'rgba(0,88,188,0.06)' : undefined,
-                                            }}
-                                        >
-                                            <td className="mono">{call.fromNumber}</td>
-                                            <td>{call.accountName ?? 'Unknown'}</td>
-                                            <td><span className="status-badge">{call.status}</span></td>
-                                            <td>{fmtDuration(call.duration)}</td>
-                                            <td>{fmtShortTime(call.createdAt)}</td>
-                                        </tr>
-                                    ))}
+                                    {recentCalls.map((call) => {
+                                        const number = call.direction === 'inbound' ? call.fromNumber : call.toNumber;
+                                        return (
+                                            <tr
+                                                key={call.id}
+                                                onClick={() => setSelectedCall(call)}
+                                                style={{
+                                                    cursor: 'pointer',
+                                                    background: selectedCall?.id === call.id ? 'rgba(0,88,188,0.06)' : undefined,
+                                                }}
+                                            >
+                                                <td>{call.direction === 'inbound' ? '←' : '→'}</td>
+                                                <td className="mono">{number}</td>
+                                                <td>{call.accountName ?? 'Unknown'}</td>
+                                                <td><span className="status-badge">{call.status}</span></td>
+                                                <td>{fmtDuration(call.duration)}</td>
+                                                <td>{fmtShortTime(call.createdAt)}</td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
@@ -349,7 +497,7 @@ export default function DashboardPage() {
                             <h3>Account Details</h3>
                         </div>
                         {!focusPhone && (
-                            <div className="notice notice-info">Select a call to view account details.</div>
+                            <div className="notice notice-info">Select a call or take an inbound call to view account details.</div>
                         )}
                         {focusPhone && crmLoading && (
                             <p style={{ color: 'var(--text-muted)' }}>Looking up account...</p>
@@ -419,7 +567,7 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Disposition Form -- only during wrap-up */}
-                    {callState === 'wrap-up' && (
+                    {phase === 'wrap-up' && (
                         <div className="glass-panel workspace-panel">
                             <div className="panel-heading">
                                 <h3>Disposition</h3>

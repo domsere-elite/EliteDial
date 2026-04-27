@@ -4,6 +4,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import Link from 'next/link';
 import ThemeToggle from '@/components/ThemeToggle';
+import { RealtimeProvider } from '@/components/RealtimeProvider';
 import api from '@/lib/api';
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -81,6 +82,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     const displayName = `${user.firstName} ${user.lastName}`;
 
     return (
+        <RealtimeProvider>
         <div className="app-shell">
             <aside className="sidebar">
                 <div className="sidebar-brand">
@@ -159,5 +161,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {children}
             </main>
         </div>
+        </RealtimeProvider>
     );
 }
