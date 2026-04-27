@@ -263,44 +263,99 @@ export class SignalWireService implements TelephonyProvider {
     // address. We keep one Resource per agent; the inline SWML is rewritten before
     // each call (see updateAgentDialResource) to point at that call's destination.
     //
-    // Resource address shape: /private/<name>?channel=audio
+    // The address is read from /api/fabric/addresses (NOT hand-constructed) — for
+    // SWML scripts, SignalWire assigns an address whose channels.audio is the
+    // dialable path; reusing the /private/<name> subscriber pattern silently fails.
     async ensureAgentDialResource(agentReference: string): Promise<{ resourceId: string; address: string } | null> {
         if (!this.isConfigured) return null;
 
         const name = `agent-dial-${agentReference}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 64);
-        // No ?channel=audio — client.dial() picks the channel from the
-        // audio/video flags. Including the query string here causes the
-        // SDK to silently fail to open the media leg.
-        const address = `/private/${name}`;
 
         const listResp = await this.fetchImpl(
             `${this.baseUrl}/api/fabric/resources?page_size=200`,
             { headers: { Authorization: this.authHeader } },
         );
+        let resourceId: string | null = null;
+        let resourceRaw: unknown = null;
         if (listResp.ok) {
-            const listData = (await listResp.json()) as { data?: Array<{ id: string; type: string; display_name: string }> };
+            const listData = (await listResp.json()) as {
+                data?: Array<{ id: string; type: string; display_name: string; addresses?: unknown }>;
+            };
             const existing = (listData.data || []).find(r => r.type === 'swml_script' && r.display_name === name);
-            if (existing) return { resourceId: existing.id, address };
+            if (existing) {
+                resourceId = existing.id;
+                resourceRaw = existing;
+            }
         }
 
-        const createResp = await this.fetchImpl(
-            `${this.baseUrl}/api/fabric/resources/swml_scripts`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
-                body: JSON.stringify({
-                    name,
-                    contents: { version: '1.0.0', sections: { main: [{ hangup: {} }] } },
-                }),
-            },
-        );
-        if (!createResp.ok) {
-            const bodyText = await createResp.text();
-            logger.error('SignalWire ensureAgentDialResource create failed', { status: createResp.status, body: bodyText, name });
-            return null;
+        if (!resourceId) {
+            const createResp = await this.fetchImpl(
+                `${this.baseUrl}/api/fabric/resources/swml_scripts`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
+                    body: JSON.stringify({
+                        name,
+                        contents: { version: '1.0.0', sections: { main: [{ hangup: {} }] } },
+                    }),
+                },
+            );
+            if (!createResp.ok) {
+                const bodyText = await createResp.text();
+                logger.error('SignalWire ensureAgentDialResource create failed', { status: createResp.status, body: bodyText, name });
+                return null;
+            }
+            const created = (await createResp.json()) as { id: string };
+            resourceId = created.id;
+            resourceRaw = created;
         }
-        const created = (await createResp.json()) as { id: string };
-        return { resourceId: created.id, address };
+
+        // Discover the actual dialable address by listing fabric addresses
+        // and matching by name. The SDK's client.dial() needs a real address
+        // assigned by SignalWire, not a hand-constructed /private/<name>.
+        let discoveredAddress: string | null = null;
+        let addressesRaw: unknown = null;
+        try {
+            const addrResp = await this.fetchImpl(
+                `${this.baseUrl}/api/fabric/addresses?page_size=200`,
+                { headers: { Authorization: this.authHeader } },
+            );
+            if (addrResp.ok) {
+                const addrData = (await addrResp.json()) as {
+                    data?: Array<{
+                        id: string;
+                        name: string;
+                        display_name?: string;
+                        type: string;
+                        channels?: { audio?: string; video?: string; messaging?: string };
+                    }>;
+                };
+                addressesRaw = addrData.data;
+                const match = (addrData.data || []).find(a => a.name === name || a.display_name === name);
+                if (match?.channels?.audio) {
+                    discoveredAddress = match.channels.audio.replace(/\?channel=audio$/, '');
+                }
+            }
+        } catch (err) {
+            logger.warn('SignalWire address discovery failed', { error: err });
+        }
+
+        const fallbackAddress = `/private/${name}`;
+        const address = discoveredAddress || fallbackAddress;
+        logger.info('SignalWire ensureAgentDialResource', {
+            name,
+            resourceId,
+            chosenAddress: address,
+            discoveredAddress,
+            usedFallback: !discoveredAddress,
+            resourceRaw,
+            addressesSample: Array.isArray(addressesRaw)
+                ? (addressesRaw as Array<{ name: string; type: string; channels?: unknown }>)
+                    .map(a => ({ name: a.name, type: a.type, channels: a.channels }))
+                : null,
+        });
+
+        return { resourceId: resourceId!, address };
     }
 
     // Rewrite the agent's dial Resource so the next dial connects audio to a specific
