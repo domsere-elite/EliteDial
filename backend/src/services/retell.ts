@@ -102,7 +102,7 @@ class RetellService implements AICallProvider {
             return MOCK_AGENTS;
         }
         try {
-            const response = await axios.get(`${config.retell.baseUrl}/v2/list-agents`, {
+            const response = await axios.get(`${config.retell.baseUrl}/list-agents`, {
                 headers: { 'Authorization': `Bearer ${config.retell.apiKey}` },
                 timeout: 10000,
             });
@@ -118,7 +118,7 @@ class RetellService implements AICallProvider {
             return MOCK_AGENTS.find(a => a.agent_id === agentId) || null;
         }
         try {
-            const response = await axios.get(`${config.retell.baseUrl}/v2/get-agent/${encodeURIComponent(agentId)}`, {
+            const response = await axios.get(`${config.retell.baseUrl}/get-agent/${encodeURIComponent(agentId)}`, {
                 headers: { 'Authorization': `Bearer ${config.retell.apiKey}` },
                 timeout: 10000,
             });

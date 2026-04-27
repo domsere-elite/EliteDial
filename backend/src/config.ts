@@ -65,6 +65,9 @@ export const config = {
         return ['sip-endpoint', 'relay-v2'].includes(this.signalwire.softphoneTransport);
     },
     get isRetellConfigured(): boolean {
+        return !!this.retell.apiKey;
+    },
+    get isRetellOutboundConfigured(): boolean {
         return !!(this.retell.apiKey && this.retell.defaultAgentId);
     },
     get isCrmConfigured(): boolean {

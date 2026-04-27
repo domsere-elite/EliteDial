@@ -194,10 +194,10 @@ export class SignalWireService implements TelephonyProvider {
                 return null;
             }
 
-            const data = (await response.json()) as { call_id?: string };
+            const data = (await response.json()) as { id?: string; call_id?: string };
             return {
                 provider: this.name,
-                providerCallId: data.call_id || '',
+                providerCallId: data.id || data.call_id || '',
                 raw: { callbackUrl: params.callbackUrl },
             };
         } catch (err) {

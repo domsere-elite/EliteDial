@@ -8,7 +8,7 @@ import { config } from '../config';
 import { logger } from '../utils/logger';
 import { providerRegistry } from '../services/provider-registry';
 import { callSessionService } from '../services/call-session-service';
-import { phoneNumberService } from '../services/phone-number-service';
+import { phoneNumberService, normalizePhone } from '../services/phone-number-service';
 import { crmAdapter } from '../services/crm-adapter';
 import { getBackendBaseUrl } from '../utils/backend-url';
 import { signalwireService } from '../services/signalwire';
@@ -102,16 +102,23 @@ const resolveCampaignContactOutcome = async (callId: string, outcome: 'completed
 
 // POST /api/calls/initiate — click-to-dial
 router.post('/initiate', authenticate, validate(initiateCallSchema), async (req: Request, res: Response): Promise<void> => {
-    const { toNumber, fromNumber, accountId, accountName, mode = 'agent', aiTarget, amdEnabled, aiAgentId, dynamicVariables, metadata, mockScenario, reservationToken } = req.body;
+    const { toNumber: rawToNumber, fromNumber: rawFromNumber, accountId, accountName, mode = 'agent', aiTarget, amdEnabled, aiAgentId, dynamicVariables, metadata, mockScenario, reservationToken } = req.body;
     const isAiMode = mode === 'ai';
     const requestedCampaignContactId = req.body.campaignContactId as string | undefined;
     const primaryTelephonyProvider = providerRegistry.getPrimaryTelephonyProvider();
     const primaryAIProvider = providerRegistry.getPrimaryAIProvider();
 
-    if (!toNumber) {
+    if (!rawToNumber) {
         res.status(400).json({ error: 'toNumber is required' });
         return;
     }
+
+    const toNumber = normalizePhone(rawToNumber);
+    if (!/^\+\d{10,15}$/.test(toNumber)) {
+        res.status(400).json({ error: 'toNumber must be a valid phone number in E.164 format (e.g. +15551234567)' });
+        return;
+    }
+    const fromNumber = rawFromNumber ? normalizePhone(rawFromNumber) : rawFromNumber;
 
     if (!isAiMode && !req.user?.id) {
         res.status(400).json({ error: 'agent id is required for agent mode' });
@@ -371,13 +378,20 @@ router.post('/initiate', authenticate, validate(initiateCallSchema), async (req:
 });
 
 router.post('/browser-session', authenticate, validate(browserSessionSchema), async (req: Request, res: Response): Promise<void> => {
-    const { toNumber, fromNumber, accountId, accountName, reservationToken } = req.body;
+    const { toNumber: rawToNumber, fromNumber: rawFromNumber, accountId, accountName, reservationToken } = req.body;
     const requestedCampaignContactId = req.body.campaignContactId as string | undefined;
 
-    if (!toNumber) {
+    if (!rawToNumber) {
         res.status(400).json({ error: 'toNumber is required' });
         return;
     }
+
+    const toNumber = normalizePhone(rawToNumber);
+    if (!/^\+\d{10,15}$/.test(toNumber)) {
+        res.status(400).json({ error: 'toNumber must be a valid phone number in E.164 format (e.g. +15551234567)' });
+        return;
+    }
+    const fromNumber = rawFromNumber ? normalizePhone(rawFromNumber) : rawFromNumber;
 
     const isDNC = await dncService.isOnDNC(toNumber);
     if (isDNC) {
