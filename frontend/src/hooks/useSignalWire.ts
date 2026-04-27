@@ -197,22 +197,11 @@ export function useSignalWire() {
     }, []);
 
     const dial = useCallback(async (toNumber: string): Promise<DialResult | null> => {
-        if (!clientRef.current) {
-            await connect();
-        }
-        const client = clientRef.current;
-        if (!client) {
-            setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
-            return null;
-        }
-
         // Backend creates/updates a SWML Resource configured to connect to this
         // specific destination, then returns its Fabric address (e.g.
-        // "/private/agent-dial-XYZ?channel=audio"). We dial that address; the
-        // SDK opens a WebRTC media path to SignalWire which executes the
-        // Resource's SWML and bridges to the PSTN destination. No backend
-        // origination, no SIP invite to the browser, no incomingCallHandlers
-        // dependency.
+        // "/private/agent-dial-XYZ"). We dial that address; the SDK opens a
+        // WebRTC media path to SignalWire which executes the Resource's SWML
+        // and bridges to the PSTN destination.
         let sessionResp: { callId: string; resourceAddress: string; fromNumber?: string };
         try {
             const { data } = await api.post('/calls/browser-session', { toNumber });
@@ -242,11 +231,12 @@ export function useSignalWire() {
             error: '',
         }));
 
-        // Ensure mic permission is granted and AudioContext is unsuspended
-        // BEFORE invoking client.dial. Both are user-gesture-gated in the
-        // browser; without them client.dial returns a session that never
-        // negotiates media and the SWML connect step on SignalWire's side
-        // never runs.
+        // CRITICAL ORDERING: AudioContext.resume() + getUserMedia must complete
+        // BEFORE SignalWire({token}) initializes its RTCPeerConnection pool.
+        // Otherwise the pool pre-creates peer connections while audio is
+        // suspended/no-mic-permission, ICE gathering times out, and the pool's
+        // pre-created PC is poisoned. client.dial() reuses that PC and returns
+        // a room session that stays at state "new" forever.
         try {
             const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
             // eslint-disable-next-line no-console
@@ -273,6 +263,19 @@ export function useSignalWire() {
             void pushBrowserStatus(backendCallId, { relayState: 'failed', details: { reason: 'mic_permission_denied' } });
             cleanupActive();
             setState((prev) => ({ ...prev, error: 'Microphone access required: ' + message }));
+            return null;
+        }
+
+        // Now that audio is ready, initialize the SDK if needed.
+        if (!clientRef.current) {
+            // eslint-disable-next-line no-console
+            console.log('[SW-DIAL] lazy-initializing SignalWire client (post-audio-ready)');
+            await connect();
+        }
+        const client = clientRef.current;
+        if (!client) {
+            setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
+            cleanupActive();
             return null;
         }
 
