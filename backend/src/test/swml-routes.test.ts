@@ -231,7 +231,9 @@ test('swml-routes: /power-dial/claim — winner returns bridge SWML to /private/
     const connect = res.body.sections.main.find((s: any) => s.connect !== undefined);
     assert.ok(connect, 'bridge connect step present');
     assert.equal(connect.connect.to, '/private/dominic');
-    assert.equal(connect.connect.from, '+13467760336', 'callerId carried through bridge');
+    // No `from:` on connect — softphone outbound shape; live smoke proved
+    // adding it broke Fabric bridge resolution.
+    assert.equal(connect.connect.from, undefined);
     assert.deepEqual(calls, [{ batchId: 'batch-1', legId: 'leg-1' }]);
 });
 

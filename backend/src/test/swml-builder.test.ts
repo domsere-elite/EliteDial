@@ -221,23 +221,25 @@ test('swml-builder: powerDialDetectSwml URL-encodes ids that contain unsafe char
 
 // ---- powerDialBridgeAgentSwml ------------------------------------------------
 
-test('swml-builder: powerDialBridgeAgentSwml connects to /private/<targetRef> with caller ID', () => {
+test('swml-builder: powerDialBridgeAgentSwml connects to /private/<targetRef>', () => {
+    // Mirrors the working softphone outbound SWML shape exactly. The Phase 2
+    // live smoke showed that adding `from:` and `record_call:` here breaks
+    // Fabric bridge resolution; this test pins the minimal working shape.
     const doc = powerDialBridgeAgentSwml({ targetRef: 'dominic', callerId: '+13467760336' });
     assert.equal(doc.version, '1.0.0');
     const connect = doc.sections.main.find((s: any) => s.connect !== undefined);
     assert.ok(connect, 'connect step present');
     assert.equal(connect.connect.to, '/private/dominic');
-    assert.equal(connect.connect.from, '+13467760336');
+    assert.equal(connect.connect.from, undefined, 'no from: — softphone outbound omits this');
     assert.equal(connect.connect.answer_on_bridge, true);
-    assert.ok(connect.on_failure, 'on_failure handler present');
+    assert.equal(connect.connect.timeout, 30);
 });
 
-test('swml-builder: powerDialBridgeAgentSwml records the bridged call', () => {
+test('swml-builder: powerDialBridgeAgentSwml has trailing hangup, no record_call', () => {
     const doc = powerDialBridgeAgentSwml({ targetRef: 'agent42', callerId: '+15551112222' });
-    const recorder = doc.sections.main.find((s: any) => s.record_call !== undefined);
-    assert.ok(recorder, 'record_call step present');
-    assert.equal(recorder.record_call.stereo, true);
-    assert.equal(recorder.record_call.format, 'mp3');
+    const main = doc.sections.main;
+    assert.ok(main.some((s: any) => s.hangup !== undefined), 'trailing hangup present');
+    assert.ok(!main.some((s: any) => s.record_call !== undefined), 'no record_call (broke bridge in smoke)');
 });
 
 // ---- powerDialOverflowSwml ---------------------------------------------------

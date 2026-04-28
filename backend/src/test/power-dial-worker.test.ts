@@ -15,6 +15,7 @@ import {
 interface Recorder {
     legsCreated: Array<{ id: string; batchId: string; contactId: string; legIndex: number }>;
     batchesCreated: Array<{ id: string; campaignId: string; agentId: string; legCount: number; targetRef: string }>;
+    notifications: Array<{ agentId: string; batchId: string; targetRef: string }>;
     legsOriginated: Array<{ to: string; from: string; batchId: string; legId: string; campaignId: string; callerId: string }>;
     legsFailed: string[];
     legProviderCallIds: Record<string, string>;
@@ -34,6 +35,7 @@ function makeDeps(overrides: Partial<ProgressivePowerDialWorkerDeps> & {
     const rec: Recorder = {
         legsCreated: [],
         batchesCreated: [],
+        notifications: [],
         legsOriginated: [],
         legsFailed: [],
         legProviderCallIds: {},
@@ -75,6 +77,9 @@ function makeDeps(overrides: Partial<ProgressivePowerDialWorkerDeps> & {
         },
         revertAgent: async (agentId) => { rec.agentsReverted.push(agentId); },
         createBatch: async (params) => { rec.batchesCreated.push(params); },
+        notifyAgentOfBatch: async (params) => {
+            rec.notifications.push({ agentId: params.agentId, batchId: params.id, targetRef: params.targetRef });
+        },
         createLeg: async (params) => { rec.legsCreated.push(params); },
         updateLegProviderCallId: async (legId, providerCallId) => {
             rec.legProviderCallIds[legId] = providerCallId;
@@ -186,6 +191,15 @@ test('power-dial-worker: dialRatio=2.0, 1 agent → 2 legs originate in one batc
     assert.equal(rec.batchesCreated[0].agentId, 'agent-uuid-a');
     assert.equal(rec.batchesCreated[0].targetRef, 'dominic', 'targetRef = email local-part');
     assert.equal(rec.batchesCreated[0].legCount, 2);
+
+    // Frontend pre-arm: agent gets a Socket.IO event with the batch info BEFORE
+    // any leg originates, so the auto-accept handler is ready when the bridge fires.
+    assert.equal(rec.notifications.length, 1);
+    assert.deepEqual(rec.notifications[0], {
+        agentId: 'agent-uuid-a',
+        batchId: rec.batchesCreated[0].id,
+        targetRef: 'dominic',
+    });
 
     assert.equal(rec.legsOriginated.length, 2);
     assert.deepEqual(rec.legsOriginated.map((l) => l.to).sort(), ['+15551110001', '+15551110002']);

@@ -79,6 +79,11 @@ export interface ProgressivePowerDialWorkerDeps {
     claimAgent: (agentId: string) => Promise<boolean>; // atomic 'available' → 'on-call'
     revertAgent: (agentId: string) => Promise<void>;
     createBatch: (params: PowerDialBatchInsert) => Promise<void>;
+    // Emits a Socket.IO event to the agent's user room so the frontend can
+    // pre-arm itself to auto-accept the upcoming Fabric bridge notification
+    // (which arrives without a pendingOutboundRef since the worker, not the
+    // softphone dial path, is originating the call).
+    notifyAgentOfBatch: (params: PowerDialBatchInsert) => Promise<void>;
     createLeg: (params: PowerDialLegInsert) => Promise<void>;
     updateLegProviderCallId: (legId: string, providerCallId: string) => Promise<void>;
     markLegFailed: (legId: string) => Promise<void>;
@@ -119,6 +124,7 @@ export function buildProgressivePowerDialWorker(
         claimAgent,
         revertAgent,
         createBatch,
+        notifyAgentOfBatch,
         createLeg,
         updateLegProviderCallId,
         markLegFailed,
@@ -198,14 +204,19 @@ export function buildProgressivePowerDialWorker(
         const batchId = newId();
         const expiresAt = new Date(clock().getTime() + batchTtlSeconds * 1000);
 
-        await createBatch({
+        const batchInsert: PowerDialBatchInsert = {
             id: batchId,
             campaignId: campaign.id,
             agentId: agent.id,
             targetRef,
             legCount: reserved.length,
             expiresAt,
-        });
+        };
+        await createBatch(batchInsert);
+        // Pre-arm the frontend so it auto-accepts the bridge notification
+        // when the customer answers. Order matters: this fires BEFORE the
+        // legs originate so the ref is set well before any bridge arrives.
+        await notifyAgentOfBatch(batchInsert);
 
         let originatedAny = false;
         for (let legIndex = 0; legIndex < reserved.length; legIndex += 1) {
@@ -317,6 +328,7 @@ import { config } from '../config';
 import { campaignReservationService } from './campaign-reservation-service';
 import { signalwireService } from './signalwire';
 import { didRouter } from './did-router';
+import { emitToUser } from '../lib/socket';
 
 const defaultCallbackUrl =
     config.publicUrls?.backend || `http://localhost:${config.port}`;
@@ -385,6 +397,15 @@ const defaultCreateBatch = async (p: PowerDialBatchInsert): Promise<void> => {
     await prisma.powerDialBatch.create({ data: p });
 };
 
+const defaultNotifyAgentOfBatch = async (p: PowerDialBatchInsert): Promise<void> => {
+    emitToUser(p.agentId, 'power_dial.batch.dispatched', {
+        batchId: p.id,
+        targetRef: p.targetRef,
+        legCount: p.legCount,
+        expiresAt: p.expiresAt.toISOString(),
+    });
+};
+
 const defaultCreateLeg = async (p: PowerDialLegInsert): Promise<void> => {
     await prisma.powerDialLeg.create({ data: p });
 };
@@ -435,6 +456,7 @@ export const progressivePowerDialWorker: ProgressivePowerDialWorker = buildProgr
     claimAgent: defaultClaimAgent,
     revertAgent: defaultRevertAgent,
     createBatch: defaultCreateBatch,
+    notifyAgentOfBatch: defaultNotifyAgentOfBatch,
     createLeg: defaultCreateLeg,
     updateLegProviderCallId: defaultUpdateLegProviderCallId,
     markLegFailed: defaultMarkLegFailed,

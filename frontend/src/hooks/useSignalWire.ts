@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { SignalWire, type SignalWireClient, type FabricRoomSession, type IncomingCallNotification } from '@signalwire/js';
 import api from '@/lib/api';
+import { useRealtime } from '@/components/RealtimeProvider';
 
 interface IncomingCall {
     callerName: string;
@@ -36,6 +37,17 @@ interface PendingOutbound {
     toNumber: string;
     fromNumber?: string;
     placedAt: number;
+}
+
+// A power-dial batch the worker has pre-armed us about. The Fabric bridge
+// notification will arrive with no pendingOutboundRef (worker dispatched the
+// call; we never POSTed /api/calls/browser-session), so we use this to
+// recognise the upcoming bridge and auto-accept silently.
+interface PendingPowerDialBatch {
+    batchId: string;
+    targetRef: string;
+    expiresAt: number; // ms epoch
+    receivedAt: number;
 }
 
 type CallStateEventParams = { call_state?: string; call_id?: string };
@@ -79,6 +91,39 @@ export function useSignalWire() {
     const activeBackendCallIdRef = useRef<string | null>(null);
     const pendingInviteRef = useRef<IncomingCallNotification | null>(null);
     const pendingOutboundRef = useRef<PendingOutbound | null>(null);
+    const pendingPowerDialBatchesRef = useRef<PendingPowerDialBatch[]>([]);
+
+    // Subscribe to power_dial.batch.dispatched events. Worker fires this BEFORE
+    // it originates the legs, so by the time the customer's leg AMD-detects
+    // human and the bridge to /private/<targetRef> reaches our SDK, this ref
+    // is already populated and the invite handler auto-accepts silently.
+    const realtime = useRealtime();
+    useEffect(() => {
+        const handler = (...args: unknown[]) => {
+            const payload = args[0] as { batchId?: string; targetRef?: string; expiresAt?: string } | undefined;
+            if (!payload?.batchId || !payload?.targetRef || !payload?.expiresAt) return;
+            // Drop expired entries first to keep the array small.
+            const now = Date.now();
+            pendingPowerDialBatchesRef.current = pendingPowerDialBatchesRef.current.filter((b) => b.expiresAt > now);
+            pendingPowerDialBatchesRef.current.push({
+                batchId: payload.batchId,
+                targetRef: payload.targetRef,
+                expiresAt: new Date(payload.expiresAt).getTime(),
+                receivedAt: now,
+            });
+            console.info('[useSignalWire] power-dial batch armed', payload);
+        };
+        realtime.on('power_dial.batch.dispatched', handler);
+        return () => realtime.off('power_dial.batch.dispatched', handler);
+    }, [realtime]);
+
+    function consumePendingPowerDialBatch(): PendingPowerDialBatch | null {
+        const now = Date.now();
+        // Drop expired.
+        pendingPowerDialBatchesRef.current = pendingPowerDialBatchesRef.current.filter((b) => b.expiresAt > now);
+        const next = pendingPowerDialBatchesRef.current.shift() || null;
+        return next;
+    }
 
     const pushBrowserStatus = useCallback(async (callId: string, payload: {
         providerCallId?: string;
@@ -200,6 +245,15 @@ export function useSignalWire() {
                     all: async (notification) => {
                         const details = notification.invite.details as unknown as Record<string, string | undefined>;
                         const pending = pendingOutboundRef.current;
+                        console.info('[useSignalWire] incoming Fabric invite', {
+                            hasPendingOutbound: !!pending,
+                            pendingPowerDialBatches: pendingPowerDialBatchesRef.current.length,
+                            details: {
+                                call_id: details.call_id,
+                                from: details.caller_id_number || details.from,
+                                to: details.destination_number || details.to,
+                            },
+                        });
 
                         if (inviteMatchesPending(details, pending) && pending) {
                             // This SIP invite is the agent leg of an outbound we just placed.
@@ -241,7 +295,41 @@ export function useSignalWire() {
                             return;
                         }
 
+                        // Worker-originated bridge: a PowerDialBatch has been
+                        // pre-armed via Socket.IO; this Fabric notification is
+                        // the bridge from the customer leg's claim. Auto-accept
+                        // silently so the agent is connected without a UI prompt.
+                        const batch = consumePendingPowerDialBatch();
+                        if (batch) {
+                            console.info('[useSignalWire] auto-accepting worker-originated bridge', { batchId: batch.batchId });
+                            try {
+                                const session = await notification.invite.accept({ rootElement: ensureMediaRoot() });
+                                activeCallRef.current = session;
+                                // No backendCallId for power-dial bridges — the
+                                // worker writes its own audit trail; we just
+                                // need the active session for hangup/UI.
+                                activeBackendCallIdRef.current = null;
+                                wireRoomEvents(session, '');
+                                setState((prev) => ({
+                                    ...prev,
+                                    onCall: true,
+                                    ringing: false,
+                                    incomingCall: null,
+                                    callId: null,
+                                    providerCallId: details.call_id || null,
+                                    currentNumber: details.caller_id_number || '',
+                                    error: '',
+                                }));
+                            } catch (err) {
+                                const message = err instanceof Error ? err.message : 'Unable to attach to power-dial bridge';
+                                console.error('[useSignalWire] power-dial bridge accept failed', err);
+                                setState((prev) => ({ ...prev, ringing: false, error: message }));
+                            }
+                            return;
+                        }
+
                         // Genuine inbound call → surface to UI for accept/reject.
+                        console.info('[useSignalWire] surfacing as genuine inbound (no pending outbound or batch)');
                         pendingInviteRef.current = notification;
                         setState((prev) => ({
                             ...prev,

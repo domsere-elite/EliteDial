@@ -358,9 +358,11 @@ export interface PowerDialBridgeAgentParams {
 }
 
 // Returned from /swml/power-dial/claim when a leg wins the race for the agent slot.
-// Connects the customer to the agent's Fabric address. Same shape the softphone
-// outbound uses — keep it identical so the agent SDK's incoming-Fabric handler
-// doesn't need a new branch.
+// Connects the customer to the agent's Fabric address. Mirrors the working
+// softphone outbound exactly: no `from:` on connect, no record_call here (that
+// was tripping the Fabric bridge in the Phase 2 smoke; the working softphone
+// outbound omits both). callerId is kept on the params for symmetry but unused;
+// SignalWire propagates the customer leg's existing caller_id through the bridge.
 export function powerDialBridgeAgentSwml(p: PowerDialBridgeAgentParams): SwmlDocument {
     return {
         version: '1.0.0',
@@ -369,13 +371,11 @@ export function powerDialBridgeAgentSwml(p: PowerDialBridgeAgentParams): SwmlDoc
                 {
                     connect: {
                         to: `/private/${p.targetRef}`,
-                        from: p.callerId,
                         timeout: 30,
                         answer_on_bridge: true,
                     },
-                    on_failure: [{ hangup: {} }],
                 },
-                { record_call: { stereo: true, format: 'mp3' } },
+                { hangup: {} },
             ],
         },
     };
