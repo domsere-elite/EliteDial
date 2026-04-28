@@ -230,6 +230,21 @@ export function useSignalWire() {
         // a SIP invite via incomingCallHandlers; the handler auto-accepts when it matches
         // pendingOutboundRef. We do NOT call client.dial — Fabric's client.dial is for
         // subscriber-to-subscriber addresses, not bare PSTN E.164.
+        //
+        // RACE: SignalWire's SIP invite to the browser can arrive faster than the
+        // /browser-session response returns. Set pendingOutboundRef BEFORE the POST
+        // with a placeholder providerCallId; inviteMatchesPending falls back to a
+        // 15-second age window when ids don't match, so as long as pending exists
+        // and is recent, the invite auto-accepts.
+        const provisionalPlacedAt = Date.now();
+        pendingOutboundRef.current = {
+            backendCallId: '',
+            providerCallId: '',
+            toNumber,
+            fromNumber: undefined,
+            placedAt: provisionalPlacedAt,
+        };
+
         let sessionResp: { callId: string; providerCallId?: string; fromNumber?: string };
         try {
             const { data } = await api.post('/calls/browser-session', { toNumber });
@@ -239,22 +254,27 @@ export function useSignalWire() {
                 fromNumber: data.fromNumber,
             };
         } catch (err) {
+            pendingOutboundRef.current = null;
             const respErr = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
             setState((prev) => ({ ...prev, error: respErr || 'Failed to start outbound call' }));
             return null;
         }
 
         if (!sessionResp.providerCallId) {
+            pendingOutboundRef.current = null;
             setState((prev) => ({ ...prev, error: 'Provider did not return a call identifier' }));
             return null;
         }
 
+        // Update pending with real ids, but keep the original placedAt so a
+        // SIP invite that arrived during the network round-trip still matches
+        // by age fallback if it inspects the ref again.
         pendingOutboundRef.current = {
             backendCallId: sessionResp.callId,
             providerCallId: sessionResp.providerCallId,
             toNumber,
             fromNumber: sessionResp.fromNumber,
-            placedAt: Date.now(),
+            placedAt: provisionalPlacedAt,
         };
         activeBackendCallIdRef.current = sessionResp.callId;
         setState((prev) => ({
