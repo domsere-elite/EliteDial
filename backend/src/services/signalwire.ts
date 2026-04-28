@@ -86,17 +86,18 @@ export class SignalWireService implements TelephonyProvider {
         }
     }
 
-    private async requestSubscriberToken(reference: string): Promise<BrowserTokenResult> {
+    private async requestSubscriberToken(reference: string): Promise<BrowserTokenResult & { subscriberId?: string }> {
         const response = await this.fetchImpl(`${this.baseUrl}/api/fabric/subscribers/tokens`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
             body: JSON.stringify({ reference }),
         });
         if (response.ok) {
-            const data = (await response.json()) as { token?: string };
+            const data = (await response.json()) as { token?: string; subscriber_id?: string };
             return {
                 token: data.token || null,
-                metadata: { provider: this.name, spaceUrl: this.spaceUrl, endpointReference: reference, reusedSubscriber: true },
+                subscriberId: data.subscriber_id,
+                metadata: { provider: this.name, spaceUrl: this.spaceUrl, endpointReference: reference, reusedSubscriber: true, subscriberId: data.subscriber_id },
             };
         }
         const errBody = await response.text();
@@ -109,6 +110,28 @@ export class SignalWireService implements TelephonyProvider {
             error: `sat_generation_failed_${response.status}`,
             metadata: { provider: this.name, endpointReference: reference, responseStatus: response.status, responseBody: errBody },
         };
+    }
+
+    // Idempotently set password on a subscriber. SignalWire's /api/fabric/subscribers/tokens
+    // endpoint auto-creates a subscriber when the reference doesn't match an existing one,
+    // but the auto-created subscriber has NO password. Without a password, client.online()
+    // registration fails with code -32603 "WebRTC endpoint registration failed". We must
+    // PUT the password after every mint to guarantee the subscriber is fully provisioned.
+    private async ensureSubscriberPassword(subscriberId: string, reference: string): Promise<void> {
+        const password = derivedSubscriberPassword(reference);
+        try {
+            const resp = await this.fetchImpl(`${this.baseUrl}/api/fabric/subscribers/${subscriberId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
+                body: JSON.stringify({ password }),
+            });
+            if (!resp.ok) {
+                const errBody = await resp.text();
+                logger.warn('SignalWire ensureSubscriberPassword PUT failed', { status: resp.status, body: errBody, subscriberId });
+            }
+        } catch (err) {
+            logger.warn('SignalWire ensureSubscriberPassword exception', { err, subscriberId });
+        }
     }
 
     private async createSubscriber(reference: string, agentName: string, email: string): Promise<{ ok: boolean; error?: string }> {
@@ -143,7 +166,16 @@ export class SignalWireService implements TelephonyProvider {
         try {
             const reference = endpointReference || agentId;
             const existing = await this.requestSubscriberToken(reference);
-            if (existing.token) return existing;
+            if (existing.token) {
+                // SignalWire auto-creates a subscriber if reference doesn't match,
+                // but the auto-created sub has NO password and online() registration
+                // will fail with code -32603. Force-set the password idempotently
+                // before returning the token.
+                if (existing.subscriberId) {
+                    await this.ensureSubscriberPassword(existing.subscriberId, reference);
+                }
+                return existing;
+            }
 
             if (!this.allowProvisioning) {
                 logger.warn('SignalWire subscriber provisioning blocked', { agentId, reference });
@@ -159,6 +191,9 @@ export class SignalWireService implements TelephonyProvider {
             if (!create.ok) return { token: null, error: create.error || 'subscriber_create_failed' };
 
             const created = await this.requestSubscriberToken(reference);
+            if (created.token && created.subscriberId) {
+                await this.ensureSubscriberPassword(created.subscriberId, reference);
+            }
             if (created.token) {
                 return { ...created, metadata: { ...(created.metadata || {}), reusedSubscriber: false, subscriberCreated: true } };
             }
