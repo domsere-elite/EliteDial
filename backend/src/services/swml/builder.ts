@@ -291,3 +291,138 @@ export function bridgeOutboundAiSwml(params: BridgeOutboundAiParams): SwmlDocume
         },
     };
 }
+
+// --- Power-dial Phase 2 builders --------------------------------------------
+// detect_machine smoke test on executive-strategy.signalwire.com confirmed:
+//   - The verb is enabled and `wait: true` blocks until detection completes.
+//   - `cond` branches on `detect_result` work as documented.
+//   - Anything not 'human' (machine, fax, unknown) is folded into the
+//     non-human branch in the call paths below — that matches the spec
+//     ("else" → voicemail/hangup).
+
+export interface PowerDialDetectParams {
+    claimUrl: string;     // absolute URL to /swml/power-dial/claim
+    voicemailUrl: string; // absolute URL to /swml/power-dial/voicemail
+    batchId: string;
+    legId: string;
+    campaignId: string;
+    // The worker knows the DID it originated with (per-campaign DID routing
+    // means it can vary). Threading it through the URL means the claim/
+    // voicemail routes don't need to re-derive a default.
+    callerId: string;
+}
+
+// Inline SWML for the customer leg POSTed to /api/calling/calls.
+// Flow: answer → detect_machine (AMD, wait for result) → branch on detect_result.
+// Human → /swml/power-dial/claim (server decides bridge-or-overflow atomically).
+// Anything else → /swml/power-dial/voicemail (hangup or leave_message per campaign).
+export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
+    const cid = encodeURIComponent(p.callerId);
+    const claimUrl = `${p.claimUrl}?batchId=${encodeURIComponent(p.batchId)}&legId=${encodeURIComponent(p.legId)}&campaignId=${encodeURIComponent(p.campaignId)}&callerId=${cid}`;
+    const voicemailUrl = `${p.voicemailUrl}?campaignId=${encodeURIComponent(p.campaignId)}&legId=${encodeURIComponent(p.legId)}`;
+    return {
+        version: '1.0.0',
+        sections: {
+            main: [
+                { answer: {} },
+                {
+                    detect_machine: {
+                        detectors: 'amd',
+                        wait: true,
+                        timeout: 10,
+                    },
+                },
+                {
+                    cond: [
+                        {
+                            when: "detect_result == 'human'",
+                            then: [
+                                { request: { url: claimUrl, method: 'POST' } },
+                            ],
+                        },
+                        {
+                            else: [
+                                { request: { url: voicemailUrl, method: 'POST' } },
+                            ],
+                        },
+                    ],
+                },
+            ],
+        },
+    };
+}
+
+export interface PowerDialBridgeAgentParams {
+    targetRef: string; // email local-part used at /private/<ref>
+    callerId: string;  // DID for caller_id presentation; carries through bridge
+}
+
+// Returned from /swml/power-dial/claim when a leg wins the race for the agent slot.
+// Connects the customer to the agent's Fabric address. Same shape the softphone
+// outbound uses — keep it identical so the agent SDK's incoming-Fabric handler
+// doesn't need a new branch.
+export function powerDialBridgeAgentSwml(p: PowerDialBridgeAgentParams): SwmlDocument {
+    return {
+        version: '1.0.0',
+        sections: {
+            main: [
+                {
+                    connect: {
+                        to: `/private/${p.targetRef}`,
+                        from: p.callerId,
+                        timeout: 30,
+                        answer_on_bridge: true,
+                    },
+                    on_failure: [{ hangup: {} }],
+                },
+                { record_call: { stereo: true, format: 'mp3' } },
+            ],
+        },
+    };
+}
+
+export interface PowerDialOverflowParams {
+    mode: 'ai' | 'hangup' | 'leave_message';
+    retellSipAddress?: string;
+    callerId?: string;
+    voicemailMessage?: string;
+}
+
+// Returned from /swml/power-dial/claim for race losers, and from
+// /swml/power-dial/voicemail for non-human detect results when the campaign
+// has voicemailBehavior='leave_message'. For 'hangup' (or any incomplete
+// config — missing retellSipAddress, missing voicemailMessage), falls back
+// to a clean hangup.
+export function powerDialOverflowSwml(p: PowerDialOverflowParams): SwmlDocument {
+    if (p.mode === 'ai' && p.retellSipAddress && p.callerId) {
+        return {
+            version: '1.0.0',
+            sections: {
+                main: [
+                    {
+                        connect: {
+                            to: p.retellSipAddress,
+                            from: p.callerId,
+                            timeout: 30,
+                            answer_on_bridge: true,
+                        },
+                        on_failure: [{ hangup: {} }],
+                    },
+                    { record_call: { stereo: true, format: 'mp3' } },
+                ],
+            },
+        };
+    }
+    if (p.mode === 'leave_message' && p.voicemailMessage) {
+        return {
+            version: '1.0.0',
+            sections: {
+                main: [
+                    { play: { url: `say:${p.voicemailMessage}` } },
+                    { hangup: {} },
+                ],
+            },
+        };
+    }
+    return hangupSwml();
+}

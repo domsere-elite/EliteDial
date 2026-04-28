@@ -31,6 +31,7 @@ import { computeHealth } from './services/health';
 import { correlationId } from './middleware/correlation';
 import { validateEnvOrExit, validateActivationsOrWarn } from './lib/env-validation';
 import { aiAutonomousWorker } from './services/ai-autonomous-worker';
+import { progressivePowerDialWorker } from './services/progressive-power-dial-worker';
 import { concurrencyLimiter } from './services/concurrency-limiter';
 
 validateEnvOrExit();
@@ -150,6 +151,15 @@ server.listen(config.port, () => {
             logger.error('ai-autonomous-worker startup failed', { err });
         }
     })();
+
+    // Power-dial Phase 2 worker. Self-disables when
+    // POWER_DIAL_WORKER_ENABLED is unset/false (default), so this is safe to
+    // wire up without flipping behaviour in any environment.
+    try {
+        progressivePowerDialWorker.start();
+    } catch (err) {
+        logger.error('progressive-power-dial-worker startup failed', { err });
+    }
 });
 
 // ─── Graceful shutdown ───────────────────────────

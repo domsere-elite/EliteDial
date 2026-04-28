@@ -25,6 +25,7 @@ model Profile {
   callSessions CallSession[]
   voicemails   Voicemail[]
   campaigns    Campaign[]
+  powerDialBatches PowerDialBatch[]
 }
 
 model Call {
@@ -303,6 +304,7 @@ model Campaign {
   attempts           CampaignAttempt[]
   callSessions       CallSession[]
   didGroups          CampaignDIDGroup[]
+  powerDialBatches   PowerDialBatch[]
 
   @@index([status])
   @@index([createdById])
@@ -356,6 +358,7 @@ model CampaignContact {
 
   attempts           CampaignAttempt[]
   callSessions       CallSession[]
+  powerDialLegs      PowerDialLeg[]
 
   @@unique([campaignId, primaryPhone])
   @@index([campaignId, status])
@@ -439,4 +442,49 @@ model SystemSetting {
   value     String
   updatedAt DateTime @updatedAt
   updatedBy String?
+}
+
+// Power-dial Phase 2: tracks one dispatch tick's worth of parallel PSTN legs
+// targeted at a single agent. The agent's /private/<targetRef> bridge gets the
+// first AMD-confirmed-human leg via server-side claim. Other legs lose the race
+// and either route to AI overflow or hang up (see PowerDialLeg.overflowTarget).
+model PowerDialBatch {
+  id           String   @id @default(uuid())
+  campaignId   String
+  campaign     Campaign @relation(fields: [campaignId], references: [id])
+  // Profile.id is UUID-typed (Supabase auth.users FK).
+  agentId      String   @db.Uuid
+  agent        Profile  @relation(fields: [agentId], references: [id])
+  targetRef    String   // email local-part used for /private/<ref>
+  legCount     Int
+  status       String   @default("dispatching") // dispatching | claimed | exhausted
+  claimedAt    DateTime?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  legs         PowerDialLeg[]
+
+  @@index([campaignId, status])
+  @@index([agentId, status])
+  @@index([expiresAt])
+}
+
+model PowerDialLeg {
+  id              String   @id @default(uuid())
+  batchId         String
+  batch           PowerDialBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  contactId       String
+  contact         CampaignContact @relation(fields: [contactId], references: [id])
+  legIndex        Int
+  providerCallId  String?
+  status          String   @default("dialing") // dialing | rejected | machine | human-claimed | human-overflow | failed
+  detectResult    String?  // human | machine | fax | unknown
+  claimedAgent    Boolean  @default(false)
+  overflowTarget  String?  // ai | hangup
+  createdAt       DateTime @default(now())
+  completedAt    DateTime?
+
+  @@unique([batchId, legIndex])
+  @@index([providerCallId])
+  @@index([status])
 }

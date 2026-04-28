@@ -10,6 +10,9 @@ import {
     transferSwml,
     hangupSwml,
     bridgeOutboundAiSwml,
+    powerDialDetectSwml,
+    powerDialBridgeAgentSwml,
+    powerDialOverflowSwml,
 } from '../services/swml/builder';
 
 test('swml-builder: inbound IVR presents 3-option menu with action callback', () => {
@@ -142,4 +145,140 @@ test('swml-builder: bridgeOutboundAiSwml always includes record_call', () => {
     assert.ok(recorder, 'record_call step present');
     assert.equal(recorder.record_call.stereo, true);
     assert.equal(recorder.record_call.format, 'mp3');
+});
+
+// ---- powerDialDetectSwml -----------------------------------------------------
+
+test('swml-builder: powerDialDetectSwml answers, runs detect_machine, and conds on detect_result', () => {
+    const doc = powerDialDetectSwml({
+        claimUrl: 'https://api.test/swml/power-dial/claim',
+        voicemailUrl: 'https://api.test/swml/power-dial/voicemail',
+        batchId: 'batch-1',
+        legId: 'leg-1',
+        campaignId: 'camp-1',
+        callerId: '+13467760336',
+    });
+    assert.equal(doc.version, '1.0.0');
+    const main = doc.sections.main;
+
+    assert.ok(main.some((s: any) => s.answer !== undefined), 'answer step present');
+
+    const detect = main.find((s: any) => s.detect_machine !== undefined);
+    assert.ok(detect, 'detect_machine step present');
+    assert.equal(detect.detect_machine.detectors, 'amd');
+    assert.equal(detect.detect_machine.wait, true);
+    assert.ok(typeof detect.detect_machine.timeout === 'number' && detect.detect_machine.timeout > 0);
+
+    const cond = main.find((s: any) => s.cond !== undefined);
+    assert.ok(cond, 'cond step present');
+    const branches = cond.cond as any[];
+    const human = branches.find((b: any) => b.when === "detect_result == 'human'");
+    assert.ok(human, "human branch present matching detect_result == 'human'");
+    const elseBranch = branches.find((b: any) => b.else);
+    assert.ok(elseBranch, 'else branch present for non-human results');
+});
+
+test('swml-builder: powerDialDetectSwml claim URL embeds batchId+legId+campaignId+callerId; voicemail URL embeds campaignId+legId', () => {
+    const doc = powerDialDetectSwml({
+        claimUrl: 'https://api.test/swml/power-dial/claim',
+        voicemailUrl: 'https://api.test/swml/power-dial/voicemail',
+        batchId: 'batch-42',
+        legId: 'leg-7',
+        campaignId: 'camp-X',
+        callerId: '+13467760336',
+    });
+    const cond = doc.sections.main.find((s: any) => s.cond !== undefined)!.cond as any[];
+    const human = cond.find((b: any) => b.when === "detect_result == 'human'");
+    const elseBranch = cond.find((b: any) => b.else);
+
+    const humanReq = human.then.find((s: any) => s.request !== undefined);
+    assert.match(humanReq.request.url, /batchId=batch-42/);
+    assert.match(humanReq.request.url, /legId=leg-7/);
+    assert.match(humanReq.request.url, /campaignId=camp-X/);
+    assert.match(humanReq.request.url, /callerId=%2B13467760336/);
+    assert.equal(humanReq.request.method, 'POST');
+
+    const elseReq = elseBranch.else.find((s: any) => s.request !== undefined);
+    assert.match(elseReq.request.url, /campaignId=camp-X/);
+    assert.match(elseReq.request.url, /legId=leg-7/);
+    assert.equal(elseReq.request.method, 'POST');
+});
+
+test('swml-builder: powerDialDetectSwml URL-encodes ids that contain unsafe characters', () => {
+    const doc = powerDialDetectSwml({
+        claimUrl: 'https://api.test/swml/power-dial/claim',
+        voicemailUrl: 'https://api.test/swml/power-dial/voicemail',
+        batchId: 'batch with space',
+        legId: 'leg/1',
+        campaignId: 'camp&id',
+        callerId: '+1 555 0000',
+    });
+    const cond = doc.sections.main.find((s: any) => s.cond !== undefined)!.cond as any[];
+    const humanReqUrl = cond.find((b: any) => b.then).then.find((s: any) => s.request).request.url;
+    assert.match(humanReqUrl, /batchId=batch%20with%20space/);
+    assert.match(humanReqUrl, /legId=leg%2F1/);
+});
+
+// ---- powerDialBridgeAgentSwml ------------------------------------------------
+
+test('swml-builder: powerDialBridgeAgentSwml connects to /private/<targetRef> with caller ID', () => {
+    const doc = powerDialBridgeAgentSwml({ targetRef: 'dominic', callerId: '+13467760336' });
+    assert.equal(doc.version, '1.0.0');
+    const connect = doc.sections.main.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present');
+    assert.equal(connect.connect.to, '/private/dominic');
+    assert.equal(connect.connect.from, '+13467760336');
+    assert.equal(connect.connect.answer_on_bridge, true);
+    assert.ok(connect.on_failure, 'on_failure handler present');
+});
+
+test('swml-builder: powerDialBridgeAgentSwml records the bridged call', () => {
+    const doc = powerDialBridgeAgentSwml({ targetRef: 'agent42', callerId: '+15551112222' });
+    const recorder = doc.sections.main.find((s: any) => s.record_call !== undefined);
+    assert.ok(recorder, 'record_call step present');
+    assert.equal(recorder.record_call.stereo, true);
+    assert.equal(recorder.record_call.format, 'mp3');
+});
+
+// ---- powerDialOverflowSwml ---------------------------------------------------
+
+test('swml-builder: powerDialOverflowSwml(ai) connects to retellSipAddress when retell+callerId provided', () => {
+    const doc = powerDialOverflowSwml({
+        mode: 'ai',
+        retellSipAddress: 'sip:agent_abc@host',
+        callerId: '+13467760336',
+    });
+    const connect = doc.sections.main.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present for AI bridge');
+    assert.equal(connect.connect.to, 'sip:agent_abc@host');
+    assert.equal(connect.connect.from, '+13467760336');
+    const recorder = doc.sections.main.find((s: any) => s.record_call !== undefined);
+    assert.ok(recorder, 'record_call still on AI overflow path');
+});
+
+test('swml-builder: powerDialOverflowSwml(ai) falls back to hangup when retellSipAddress missing', () => {
+    const doc = powerDialOverflowSwml({ mode: 'ai', callerId: '+15550001111' });
+    assert.deepEqual(doc.sections.main, [{ hangup: {} }]);
+});
+
+test('swml-builder: powerDialOverflowSwml(leave_message) plays TTS then hangs up', () => {
+    const doc = powerDialOverflowSwml({
+        mode: 'leave_message',
+        voicemailMessage: 'Hi, this is Elite. Please call us back.',
+    });
+    const main = doc.sections.main;
+    const play = main.find((s: any) => s.play !== undefined);
+    assert.ok(play, 'play step present for TTS');
+    assert.match(play.play.url, /^say:Hi, this is Elite/);
+    assert.ok(main.some((s: any) => s.hangup !== undefined), 'hangup follows the message');
+});
+
+test('swml-builder: powerDialOverflowSwml(leave_message) without message degrades to hangup', () => {
+    const doc = powerDialOverflowSwml({ mode: 'leave_message' });
+    assert.deepEqual(doc.sections.main, [{ hangup: {} }]);
+});
+
+test('swml-builder: powerDialOverflowSwml(hangup) returns minimal hangup SWML', () => {
+    const doc = powerDialOverflowSwml({ mode: 'hangup' });
+    assert.deepEqual(doc.sections.main, [{ hangup: {} }]);
 });

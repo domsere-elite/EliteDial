@@ -7,6 +7,7 @@ import {
     OutboundCallResult,
     TelephonyProvider,
 } from './providers/types';
+import type { SwmlDocument } from './swml/builder';
 
 // Deterministic password derived from a stable secret + agent reference.
 // Subscriber records require a password per /api/fabric/subscribers docs;
@@ -275,6 +276,57 @@ export class SignalWireService implements TelephonyProvider {
             };
         } catch (err) {
             logger.error('SignalWire agent-browser call origination error', { error: err });
+            return null;
+        }
+    }
+
+    // Power-dial Phase 2: originate a single customer leg with caller-supplied
+    // inline SWML (the powerDialDetectSwml document). Mirrors the auth + error
+    // shape of originateAgentBrowserCall, but takes the SWML as an object —
+    // all SWML construction stays in services/swml/builder.ts per CLAUDE.md.
+    async originatePowerDialLeg(params: {
+        to: string;       // customer PSTN
+        from: string;     // DID (also used as caller_id)
+        swml: SwmlDocument;
+        statusUrl: string;
+    }): Promise<OutboundCallResult | null> {
+        if (!this.isConfigured) {
+            logger.warn('SignalWire not configured; returning mock power-dial leg id');
+            return { provider: this.name, providerCallId: `mock-power-dial-${Date.now()}` };
+        }
+
+        try {
+            const response = await this.fetchImpl(`${this.baseUrl}/api/calling/calls`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
+                body: JSON.stringify({
+                    command: 'dial',
+                    params: {
+                        from: params.from,
+                        to: params.to,
+                        caller_id: params.from,
+                        // SignalWire accepts the SWML document as a JSON-serialized
+                        // string here (parallel to YAML strings used elsewhere).
+                        swml: JSON.stringify(params.swml),
+                        status_url: params.statusUrl,
+                    },
+                }),
+            });
+
+            if (!response.ok) {
+                const bodyText = await response.text();
+                logger.error('SignalWire power-dial leg origination failed', { status: response.status, body: bodyText });
+                return null;
+            }
+
+            const data = (await response.json()) as { id?: string; call_id?: string };
+            return {
+                provider: this.name,
+                providerCallId: data.id || data.call_id || '',
+                raw: { transport: 'power-dial-detect-machine', to: params.to, from: params.from },
+            };
+        } catch (err) {
+            logger.error('SignalWire power-dial leg origination error', { error: err });
             return null;
         }
     }

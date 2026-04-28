@@ -58,6 +58,15 @@ export const config = {
         mode: (process.env.DIALER_MODE || 'mock') as 'mock' | 'live',
         pollIntervalMs: toInt(process.env.DIALER_POLL_INTERVAL_MS, 5000),
     },
+    powerDial: {
+        // Feature flag for Phase 2 power-dial worker. Default off — the worker
+        // and routes are deployed dark and turned on per-environment after a
+        // smoke run. Disabling reverts behaviour to strict 1:1 progressive.
+        workerEnabled: toBool(process.env.POWER_DIAL_WORKER_ENABLED, false),
+        // Batch TTL in seconds. After this, in-flight legs are cleanup-eligible.
+        // 60s covers PSTN ring (max ~30s) + AMD detection (max ~10s) + headroom.
+        batchTtlSeconds: toInt(process.env.POWER_DIAL_BATCH_TTL_SECONDS, 60),
+    },
     get isSignalWireConfigured(): boolean {
         return !!(this.signalwire.projectId && this.signalwire.apiToken && this.signalwire.spaceUrl);
     },
