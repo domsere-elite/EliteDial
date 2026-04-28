@@ -222,7 +222,7 @@ export function bridgeOutboundSwml(params: BridgeOutboundParams): SwmlDocument {
         version: '1.0.0',
         sections: {
             main: [
-                { say: { text: 'Call is being connected.' } },
+                { answer: {} },
                 {
                     connect: {
                         to: params.to,

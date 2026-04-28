@@ -143,13 +143,13 @@ test('signalwire-service: initiateOutboundCall serializes swmlQuery into URL', a
     assert.match(body.params.url, /from=%2B15551112222/);
 });
 
-test('originateAgentBrowserCall posts dial to=sip:<ref>@<space> and bridge URL with PSTN dest', async () => {
+test('originateAgentBrowserCall posts dial to=/private/<ref> and bridge URL with PSTN dest', async () => {
     const fetchMock = mock.fn(async (url: string, init?: any) => {
         assert.equal(url, 'https://test.signalwire.com/api/calling/calls');
         const body = JSON.parse(init.body);
         assert.equal(body.command, 'dial');
         assert.equal(body.params.from, '+13467760336', 'from is the DID for caller-ID on PSTN leg');
-        assert.equal(body.params.to, 'sip:agent-uuid-1@test.signalwire.com', 'to is the agent SIP URI so the browser rings first');
+        assert.equal(body.params.to, '/private/agent-uuid-1', 'to is the agent Fabric address so the browser rings first');
         assert.equal(body.params.caller_id, '+13467760336');
         assert.match(body.params.url, /\/swml\/bridge\?/);
         assert.match(body.params.url, /to=%2B18327979834/);
