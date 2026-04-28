@@ -92,9 +92,9 @@ export function useSignalWire() {
         }
     }, []);
 
-    // Hidden audio container for SDK media attachment. SignalWire's invite.accept()
-    // expects a rootElement to attach inbound media; without it the call's media
-    // setup is incomplete and SignalWire tears the call down within seconds.
+    // Visible-but-offscreen audio container for SDK media attachment. The SDK
+    // attaches a child media element here and starts playing audio; some
+    // WebRTC stacks refuse media attachment to zero-dimension elements.
     const ensureMediaRoot = useCallback((): HTMLElement => {
         if (typeof document === 'undefined') return null as unknown as HTMLElement;
         const id = '__sw_media_root';
@@ -102,10 +102,13 @@ export function useSignalWire() {
         if (!el) {
             el = document.createElement('div');
             el.id = id;
-            el.style.position = 'absolute';
-            el.style.width = '0';
-            el.style.height = '0';
+            el.style.position = 'fixed';
+            el.style.left = '-9999px';
+            el.style.top = '0';
+            el.style.width = '1px';
+            el.style.height = '1px';
             el.style.overflow = 'hidden';
+            el.style.pointerEvents = 'none';
             document.body.appendChild(el);
         }
         return el;
@@ -186,7 +189,7 @@ export function useSignalWire() {
                             // Auto-accept silently — no UI prompt.
                             pendingOutboundRef.current = null;
                             try {
-                                const session = await notification.invite.accept({ rootElement: ensureMediaRoot(), audio: true, video: false, negotiateVideo: false });
+                                const session = await notification.invite.accept({ rootElement: ensureMediaRoot() });
                                 activeCallRef.current = session;
                                 activeBackendCallIdRef.current = pending.backendCallId;
                                 wireRoomEvents(session, pending.backendCallId);
@@ -314,7 +317,7 @@ export function useSignalWire() {
         if (!invite) return;
 
         try {
-            const session = await invite.invite.accept({ rootElement: ensureMediaRoot(), audio: true, video: false, negotiateVideo: false });
+            const session = await invite.invite.accept({ rootElement: ensureMediaRoot() });
             activeCallRef.current = session;
             pendingInviteRef.current = null;
 
