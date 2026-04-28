@@ -112,22 +112,25 @@ export class SignalWireService implements TelephonyProvider {
         };
     }
 
-    // Idempotently set password on a subscriber. SignalWire's /api/fabric/subscribers/tokens
-    // endpoint auto-creates a subscriber when the reference doesn't match an existing one,
-    // but the auto-created subscriber has NO password. Without a password, client.online()
-    // registration fails with code -32603 "WebRTC endpoint registration failed". We must
-    // PUT the password after every mint to guarantee the subscriber is fully provisioned.
-    private async ensureSubscriberPassword(subscriberId: string, reference: string): Promise<void> {
+    // Idempotently set password and email on a subscriber. SignalWire's
+    // /api/fabric/subscribers/tokens endpoint auto-creates a subscriber when
+    // the reference doesn't match an existing one, but the auto-created
+    // subscriber has NO password and stores the reference (often a UUID) in
+    // the email field. Without a password, client.online() registration fails
+    // with code -32603 "WebRTC endpoint registration failed". And the PUT
+    // endpoint validates email format, so we must send a real email alongside
+    // the password.
+    private async ensureSubscriberPassword(subscriberId: string, reference: string, email: string): Promise<void> {
         const password = derivedSubscriberPassword(reference);
         try {
             const resp = await this.fetchImpl(`${this.baseUrl}/api/fabric/subscribers/${subscriberId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
-                body: JSON.stringify({ password }),
+                body: JSON.stringify({ email, password }),
             });
             if (!resp.ok) {
                 const errBody = await resp.text();
-                logger.warn('SignalWire ensureSubscriberPassword PUT failed', { status: resp.status, body: errBody, subscriberId });
+                logger.warn('SignalWire ensureSubscriberPassword PUT failed', { status: resp.status, body: errBody, subscriberId, email });
             }
         } catch (err) {
             logger.warn('SignalWire ensureSubscriberPassword exception', { err, subscriberId });
@@ -165,14 +168,17 @@ export class SignalWireService implements TelephonyProvider {
 
         try {
             const reference = endpointReference || agentId;
+            const realEmail = agentEmail || `${agentId}@users.elitedial.local`;
             const existing = await this.requestSubscriberToken(reference);
             if (existing.token) {
                 // SignalWire auto-creates a subscriber if reference doesn't match,
-                // but the auto-created sub has NO password and online() registration
-                // will fail with code -32603. Force-set the password idempotently
-                // before returning the token.
+                // but the auto-created sub has NO password and stores the reference
+                // (UUID) in the email field. online() registration fails with -32603.
+                // Force-set password + valid email idempotently before returning the
+                // token. SignalWire's PUT endpoint validates email format, so we must
+                // send a real email alongside the password.
                 if (existing.subscriberId) {
-                    await this.ensureSubscriberPassword(existing.subscriberId, reference);
+                    await this.ensureSubscriberPassword(existing.subscriberId, reference, realEmail);
                 }
                 return existing;
             }
@@ -186,13 +192,12 @@ export class SignalWireService implements TelephonyProvider {
                 };
             }
 
-            const email = agentEmail || `${agentId}@users.elitedial.local`;
-            const create = await this.createSubscriber(reference, agentName, email);
+            const create = await this.createSubscriber(reference, agentName, realEmail);
             if (!create.ok) return { token: null, error: create.error || 'subscriber_create_failed' };
 
             const created = await this.requestSubscriberToken(reference);
             if (created.token && created.subscriberId) {
-                await this.ensureSubscriberPassword(created.subscriberId, reference);
+                await this.ensureSubscriberPassword(created.subscriberId, reference, realEmail);
             }
             if (created.token) {
                 return { ...created, metadata: { ...(created.metadata || {}), reusedSubscriber: false, subscriberCreated: true } };
