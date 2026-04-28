@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import {
@@ -6,6 +7,15 @@ import {
     OutboundCallResult,
     TelephonyProvider,
 } from './providers/types';
+
+// Deterministic password derived from a stable secret + agent reference.
+// Subscriber records require a password per /api/fabric/subscribers docs;
+// without it the subscriber is half-provisioned and WebRTC endpoint
+// registration is rejected by SignalWire's edge with code -32603.
+function derivedSubscriberPassword(reference: string): string {
+    const secret = process.env.SIGNALWIRE_SUBSCRIBER_PASSWORD_SECRET || config.signalwire.apiToken || 'elitedial-fallback';
+    return createHash('sha256').update(`${secret}:${reference}`).digest('hex').slice(0, 32);
+}
 
 export interface SignalWireServiceConfig {
     projectId: string;
@@ -102,10 +112,11 @@ export class SignalWireService implements TelephonyProvider {
     }
 
     private async createSubscriber(reference: string, agentName: string, email: string): Promise<{ ok: boolean; error?: string }> {
+        const password = derivedSubscriberPassword(reference);
         const response = await this.fetchImpl(`${this.baseUrl}/api/fabric/subscribers`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
-            body: JSON.stringify({ reference, name: agentName, email }),
+            body: JSON.stringify({ reference, name: agentName, email, password }),
         });
         if (response.ok || response.status === 409 || response.status === 422) {
             return { ok: true };
