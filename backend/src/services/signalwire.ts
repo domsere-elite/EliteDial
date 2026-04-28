@@ -221,18 +221,30 @@ export class SignalWireService implements TelephonyProvider {
         }
 
         try {
-            const queryString = new URLSearchParams([
-                ['to', params.toNumber],
-                ['from', params.callerIdNumber],
-            ]).toString();
-            const swmlUrl = `${params.callbackUrl}/swml/bridge?${queryString}`;
             const statusUrl = `${params.callbackUrl}/signalwire/events/call-status`;
-            // Use the Fabric subscriber address. SignalWire resolves
-            // /private/<reference> to sip:<reference>@<projectId>.call.signalwire.com;context=private
-            // server-side. Constructing the SIP URI ourselves with the
-            // space URL produces an unreachable host (verified — calls
-            // were accepted but never reached the registered subscriber).
+            // PSTN-first origination: SignalWire dials the customer's cell, and once
+            // the customer answers, the inline SWML's `connect:` step routes the call
+            // to the agent's Fabric address /private/<ref>. The agent's browser
+            // receives a native Fabric notification (not a SIP invite) which the v3
+            // SDK handles correctly — verified live (cell rang on direct API test).
+            //
+            // Why not the reverse: dialing /private/<ref> first sends a SIP invite to
+            // the registered subscriber. The v3 browser SDK doesn't fully track
+            // SIP-invite-driven calls in its Fabric event store ("Got an unknown
+            // fabric event" warning), media negotiation never completes, and
+            // SignalWire tears the call down ~4s after answer with end_reason: hangup.
             const fabricTarget = `/private/${params.agentSipReference}`;
+            const inlineSwml = [
+                'version: 1.0.0',
+                'sections:',
+                '  main:',
+                '    - answer: {}',
+                '    - connect:',
+                `        to: ${fabricTarget}`,
+                '        timeout: 30',
+                '        answer_on_bridge: true',
+                '    - hangup: {}',
+            ].join('\n');
 
             const response = await this.fetchImpl(`${this.baseUrl}/api/calling/calls`, {
                 method: 'POST',
@@ -241,9 +253,9 @@ export class SignalWireService implements TelephonyProvider {
                     command: 'dial',
                     params: {
                         from: params.callerIdNumber,
-                        to: fabricTarget,
+                        to: params.toNumber,
                         caller_id: params.callerIdNumber,
-                        url: swmlUrl,
+                        swml: inlineSwml,
                         status_url: statusUrl,
                     },
                 }),
@@ -259,7 +271,7 @@ export class SignalWireService implements TelephonyProvider {
             return {
                 provider: this.name,
                 providerCallId: data.id || data.call_id || '',
-                raw: { fabricTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber },
+                raw: { fabricTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber, transport: 'pstn-first-fabric-bridge' },
             };
         } catch (err) {
             logger.error('SignalWire agent-browser call origination error', { error: err });

@@ -143,17 +143,17 @@ test('signalwire-service: initiateOutboundCall serializes swmlQuery into URL', a
     assert.match(body.params.url, /from=%2B15551112222/);
 });
 
-test('originateAgentBrowserCall posts dial to=/private/<ref> and bridge URL with PSTN dest', async () => {
+test('originateAgentBrowserCall posts dial to=PSTN with inline SWML connecting to /private/<ref>', async () => {
     const fetchMock = mock.fn(async (url: string, init?: any) => {
         assert.equal(url, 'https://test.signalwire.com/api/calling/calls');
         const body = JSON.parse(init.body);
         assert.equal(body.command, 'dial');
-        assert.equal(body.params.from, '+13467760336', 'from is the DID for caller-ID on PSTN leg');
-        assert.equal(body.params.to, '/private/agent-uuid-1', 'to is the agent Fabric address so the browser rings first');
+        assert.equal(body.params.from, '+13467760336', 'from is the DID');
+        assert.equal(body.params.to, '+18327979834', 'to is the customer PSTN number — dialed first');
         assert.equal(body.params.caller_id, '+13467760336');
-        assert.match(body.params.url, /\/swml\/bridge\?/);
-        assert.match(body.params.url, /to=%2B18327979834/);
-        assert.match(body.params.url, /from=%2B13467760336/);
+        assert.ok(typeof body.params.swml === 'string', 'inline SWML provided');
+        assert.match(body.params.swml, /answer:/);
+        assert.match(body.params.swml, /\/private\/agent-uuid-1/, 'connects to agent Fabric address after customer answers');
         assert.match(body.params.status_url, /\/signalwire\/events\/call-status/);
         return makeResponse(200, { id: 'sw-call-42' });
     });

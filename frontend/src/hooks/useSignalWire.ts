@@ -52,10 +52,12 @@ const inviteMatchesPending = (
     const candidates = [details.call_id, details.call_sid, details.sip_call_id, details.parent_call_id]
         .filter((v): v is string => Boolean(v));
     if (candidates.some((id) => id === providerCallId)) return true;
-    // Fallback: SignalWire SIP invite to a subscriber may not echo the originating call_id.
-    // Treat any invite arriving within 15s of an outbound origination as our outbound continuation.
+    // Fallback: with PSTN-first origination, the inbound Fabric notification only
+    // arrives AFTER the customer answers their cell — which can take 30+ seconds.
+    // Treat any invite arriving within 60s of an outbound origination as our
+    // outbound continuation.
     const ageMs = Date.now() - pending.placedAt;
-    return ageMs < 15000;
+    return ageMs < 60000;
 };
 
 export function useSignalWire() {
