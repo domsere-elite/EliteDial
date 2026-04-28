@@ -149,8 +149,15 @@ export default function DashboardPage() {
     /* ── Detect call-end → enter wrap-up ───────────────────────────── */
     useEffect(() => {
         if (sw.onCall) {
-            wasOnCallRef.current = true;
-            timer.start();
+            // Only start the timer on the transition INTO an active call.
+            // The timer object reference changes every tick (because seconds
+            // updates trigger a parent re-render), which re-fires this effect
+            // — without the wasOnCallRef guard, timer.start() would reset
+            // to 0 every second and the duration display stays at 00:00:00.
+            if (!wasOnCallRef.current) {
+                wasOnCallRef.current = true;
+                timer.start();
+            }
             return;
         }
         if (wasOnCallRef.current && !sw.onCall && !sw.ringing && !sw.incomingCall) {
