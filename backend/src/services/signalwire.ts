@@ -187,7 +187,12 @@ export class SignalWireService implements TelephonyProvider {
             ]).toString();
             const swmlUrl = `${params.callbackUrl}/swml/bridge?${queryString}`;
             const statusUrl = `${params.callbackUrl}/signalwire/events/call-status`;
-            const sipTarget = `sip:${params.agentSipReference}@${this.spaceUrl}`;
+            // Use the Fabric subscriber address. SignalWire resolves
+            // /private/<reference> to sip:<reference>@<projectId>.call.signalwire.com;context=private
+            // server-side. Constructing the SIP URI ourselves with the
+            // space URL produces an unreachable host (verified — calls
+            // were accepted but never reached the registered subscriber).
+            const fabricTarget = `/private/${params.agentSipReference}`;
 
             const response = await this.fetchImpl(`${this.baseUrl}/api/calling/calls`, {
                 method: 'POST',
@@ -196,7 +201,7 @@ export class SignalWireService implements TelephonyProvider {
                     command: 'dial',
                     params: {
                         from: params.callerIdNumber,
-                        to: sipTarget,
+                        to: fabricTarget,
                         caller_id: params.callerIdNumber,
                         url: swmlUrl,
                         status_url: statusUrl,
@@ -214,7 +219,7 @@ export class SignalWireService implements TelephonyProvider {
             return {
                 provider: this.name,
                 providerCallId: data.id || data.call_id || '',
-                raw: { sipTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber },
+                raw: { fabricTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber },
             };
         } catch (err) {
             logger.error('SignalWire agent-browser call origination error', { error: err });
