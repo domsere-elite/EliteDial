@@ -5,6 +5,9 @@ type GuardrailInputs = {
     maxConcurrentCalls: number;
     availableAgents: number;
     activeCalls: number;
+    // Progressive power-dial multiplier; defaults to 1.0 (strict 1:1) when omitted.
+    // Values >1 raise baseConcurrentLimit to floor(availableAgents * dialRatio).
+    dialRatio?: number;
 };
 
 export type DialerGuardrailSummary = {
@@ -43,11 +46,16 @@ export const computeDialerGuardrails = (input: GuardrailInputs): DialerGuardrail
         }
         baseConcurrentLimit = Math.max(0, input.maxConcurrentCalls);
     } else {
-        // Progressive (default fall-through): 1 call per available agent, capped by maxConcurrentCalls if set.
+        // Progressive: dialRatio calls per available agent, capped by maxConcurrentCalls if set.
+        // Sanitize ratio: clamp to [1.0, 5.0] to mirror the validation contract.
+        const rawRatio = typeof input.dialRatio === 'number' && Number.isFinite(input.dialRatio)
+            ? input.dialRatio
+            : 1.0;
+        const ratio = Math.max(1.0, Math.min(5.0, rawRatio));
         if (input.availableAgents <= 0) {
             blockedReasons.push('no_available_agents');
         }
-        baseConcurrentLimit = input.availableAgents;
+        baseConcurrentLimit = Math.floor(input.availableAgents * ratio);
         if (input.maxConcurrentCalls > 0) {
             baseConcurrentLimit = Math.min(baseConcurrentLimit, input.maxConcurrentCalls);
         }
@@ -65,7 +73,7 @@ export const computeDialerGuardrails = (input: GuardrailInputs): DialerGuardrail
 
     const denominator = input.dialMode === 'ai_autonomous'
         ? input.maxConcurrentCalls
-        : input.availableAgents;
+        : effectiveConcurrentLimit;
 
     const queuePressure = denominator > 0
         ? input.activeCalls / denominator

@@ -99,6 +99,11 @@ export const inboundAttachSchema = z.object({
 });
 
 // ─── Campaign Schemas ────────────────────────────
+// Bounded between 1.0 (strict 1:1) and 5.0 — guards against runaway power-dial
+// configurations. Float allows 1.5/2.5 for shops that want gradual ratios.
+const dialRatioField = z.number().min(1.0).max(5.0);
+const voicemailBehaviorField = z.enum(['hangup', 'leave_message']);
+
 export const createCampaignSchema = z.object({
     name: z.string().min(1, 'Name is required').max(200),
     description: optionalString,
@@ -107,9 +112,15 @@ export const createCampaignSchema = z.object({
     maxAttemptsPerLead: z.number().int().min(1).max(50).optional().default(6),
     retryDelaySeconds: z.number().int().min(30).optional().default(600),
     maxConcurrentCalls: z.number().int().min(0).optional().default(0),
+    dialRatio: dialRatioField.optional().default(1.0),
+    voicemailBehavior: voicemailBehaviorField.optional().default('hangup'),
+    voicemailMessage: optionalString,
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
-});
+}).refine(
+    (data) => data.voicemailBehavior !== 'leave_message' || (data.voicemailMessage && data.voicemailMessage.trim().length > 0),
+    { message: 'voicemailMessage is required when voicemailBehavior is leave_message', path: ['voicemailMessage'] },
+);
 
 export const updateCampaignSchema = z.object({
     name: optionalString,
@@ -119,6 +130,9 @@ export const updateCampaignSchema = z.object({
     maxAttemptsPerLead: z.number().int().min(1).max(50).optional(),
     retryDelaySeconds: z.number().int().min(30).optional(),
     maxConcurrentCalls: z.number().int().min(0).optional(),
+    dialRatio: dialRatioField.optional(),
+    voicemailBehavior: voicemailBehaviorField.optional(),
+    voicemailMessage: z.string().nullable().optional(),
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
 });

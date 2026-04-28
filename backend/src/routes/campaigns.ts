@@ -198,6 +198,9 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
         maxAttemptsPerLead,
         retryDelaySeconds,
         maxConcurrentCalls,
+        dialRatio,
+        voicemailBehavior,
+        voicemailMessage,
         retellAgentId,
         retellSipAddress,
     } = req.body;
@@ -211,6 +214,9 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
             maxAttemptsPerLead,
             retryDelaySeconds: Math.max(30, Math.round(toNumber(retryDelaySeconds, 600))),
             maxConcurrentCalls: Math.max(0, Math.round(toNumber(maxConcurrentCalls, 0))),
+            dialRatio: Math.max(1.0, Math.min(5.0, toNumber(dialRatio, 1.0))),
+            voicemailBehavior: voicemailBehavior ?? 'hangup',
+            voicemailMessage: voicemailMessage ?? null,
             retellAgentId: retellAgentId ?? null,
             retellSipAddress: retellSipAddress ?? null,
             createdById: req.user?.id,
@@ -264,6 +270,7 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
             status: true,
             retryDelaySeconds: true,
             maxConcurrentCalls: true,
+            dialRatio: true,
             _count: { select: { contacts: true, attempts: true } },
         },
         orderBy: { updatedAt: 'desc' },
@@ -290,6 +297,7 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
             maxConcurrentCalls: campaign.maxConcurrentCalls,
             availableAgents,
             activeCalls: activeAttempts,
+            dialRatio: campaign.dialRatio,
         });
 
         return {
@@ -299,6 +307,7 @@ router.get('/dialer/status', authenticate, requireMinRole('supervisor'), async (
             status: campaign.status,
             retryDelaySeconds: campaign.retryDelaySeconds,
             maxConcurrentCalls: campaign.maxConcurrentCalls,
+            dialRatio: campaign.dialRatio,
             totals: campaign._count,
             queue: {
                 queued,
@@ -375,6 +384,9 @@ router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(update
             maxAttemptsPerLead: validated.maxAttemptsPerLead,
             retryDelaySeconds: validated.retryDelaySeconds === undefined ? undefined : Math.max(30, Math.round(toNumber(validated.retryDelaySeconds, 600))),
             maxConcurrentCalls: validated.maxConcurrentCalls === undefined ? undefined : Math.max(0, Math.round(toNumber(validated.maxConcurrentCalls, 0))),
+            dialRatio: validated.dialRatio === undefined ? undefined : Math.max(1.0, Math.min(5.0, toNumber(validated.dialRatio, 1.0))),
+            voicemailBehavior: validated.voicemailBehavior,
+            voicemailMessage: validated.voicemailMessage,
             retellAgentId: validated.retellAgentId,
             retellSipAddress: validated.retellSipAddress,
         },

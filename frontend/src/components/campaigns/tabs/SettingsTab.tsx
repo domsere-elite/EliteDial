@@ -14,6 +14,9 @@ interface Campaign {
     maxConcurrentCalls: number;
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
+    dialRatio?: number;
+    voicemailBehavior?: string;
+    voicemailMessage?: string | null;
     retellAgentId?: string | null;
 }
 
@@ -91,6 +94,25 @@ export function SettingsTab({ campaign }: Props) {
                 <div className="card">
                     <div className="section-label" style={{ marginBottom: 10 }}>Concurrency</div>
                     <Row label="Max Concurrent Calls" value={campaign.maxConcurrentCalls === 0 ? 'Auto (use available agents)' : campaign.maxConcurrentCalls} />
+                    {campaign.dialMode === 'progressive' && (
+                        <Row
+                            label="Dial Ratio"
+                            value={`${(campaign.dialRatio ?? 1).toFixed(1)}x per agent`}
+                        />
+                    )}
+                </div>
+            )}
+
+            {campaign.dialMode === 'progressive' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>Voicemail Handling</div>
+                    <Row
+                        label="On machine detected"
+                        value={campaign.voicemailBehavior === 'leave_message' ? 'Leave a message' : 'Hang up'}
+                    />
+                    {campaign.voicemailBehavior === 'leave_message' && campaign.voicemailMessage && (
+                        <Row label="Message" value={<span style={{ fontStyle: 'italic' }}>{campaign.voicemailMessage}</span>} />
+                    )}
                 </div>
             )}
 

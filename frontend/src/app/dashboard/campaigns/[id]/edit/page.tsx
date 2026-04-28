@@ -31,6 +31,9 @@ export default function EditCampaignPage() {
                 maxConcurrentCalls: c.maxConcurrentCalls,
                 maxAttemptsPerLead: c.maxAttemptsPerLead,
                 retryDelaySeconds: c.retryDelaySeconds,
+                dialRatio: typeof c.dialRatio === 'number' ? c.dialRatio : 1.0,
+                voicemailBehavior: c.voicemailBehavior ?? 'hangup',
+                voicemailMessage: c.voicemailMessage ?? '',
                 retellAgentId: c.retellAgentId ?? null,
                 retellSipAddress: c.retellSipAddress ?? null,
             });

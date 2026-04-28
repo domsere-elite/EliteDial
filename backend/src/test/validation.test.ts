@@ -210,3 +210,57 @@ test('updateCampaignSchema: predictive is rejected', () => {
     const result = updateCampaignSchema.safeParse({ dialMode: 'predictive' });
     assert.equal(result.success, false);
 });
+
+// ─── Phase 1: power-dial config ───
+
+test('createCampaignSchema: dialRatio defaults to 1.0', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Default Ratio' });
+    assert.ok(result.success);
+    assert.equal(result.data!.dialRatio, 1.0);
+    assert.equal(result.data!.voicemailBehavior, 'hangup');
+});
+
+test('createCampaignSchema: dialRatio=3 accepted', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Power Dial', dialRatio: 3 });
+    assert.ok(result.success);
+    assert.equal(result.data!.dialRatio, 3);
+});
+
+test('createCampaignSchema: dialRatio below 1.0 rejected', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Bad Ratio', dialRatio: 0.5 });
+    assert.equal(result.success, false);
+});
+
+test('createCampaignSchema: dialRatio above 5.0 rejected', () => {
+    const result = createCampaignSchema.safeParse({ name: 'Bad Ratio', dialRatio: 6 });
+    assert.equal(result.success, false);
+});
+
+test('createCampaignSchema: leave_message without voicemailMessage rejected', () => {
+    const result = createCampaignSchema.safeParse({
+        name: 'VM Campaign',
+        voicemailBehavior: 'leave_message',
+    });
+    assert.equal(result.success, false);
+});
+
+test('createCampaignSchema: leave_message with voicemailMessage accepted', () => {
+    const result = createCampaignSchema.safeParse({
+        name: 'VM Campaign',
+        voicemailBehavior: 'leave_message',
+        voicemailMessage: 'Please call us back at 555-1234.',
+    });
+    assert.ok(result.success);
+    assert.equal(result.data!.voicemailBehavior, 'leave_message');
+});
+
+test('updateCampaignSchema: dialRatio editable mid-campaign', () => {
+    const result = updateCampaignSchema.safeParse({ dialRatio: 2.5 });
+    assert.ok(result.success);
+    assert.equal(result.data!.dialRatio, 2.5);
+});
+
+test('updateCampaignSchema: dialRatio bounds enforced', () => {
+    assert.equal(updateCampaignSchema.safeParse({ dialRatio: 0 }).success, false);
+    assert.equal(updateCampaignSchema.safeParse({ dialRatio: 10 }).success, false);
+});

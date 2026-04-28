@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { DialMode, DIAL_MODE_OPTIONS } from '@/lib/dialMode';
 import { fetchRetellAgents, RetellAgent } from '@/lib/retellAgents';
 
+export type VoicemailBehavior = 'hangup' | 'leave_message';
+
 export interface CampaignFormValues {
     name: string;
     description: string;
@@ -12,6 +14,9 @@ export interface CampaignFormValues {
     maxConcurrentCalls: number;
     maxAttemptsPerLead: number;
     retryDelaySeconds: number;
+    dialRatio: number;
+    voicemailBehavior: VoicemailBehavior;
+    voicemailMessage: string;
     retellAgentId: string | null;
     retellSipAddress: string | null;
 }
@@ -24,6 +29,9 @@ const DEFAULT_VALUES: CampaignFormValues = {
     maxConcurrentCalls: 0,
     maxAttemptsPerLead: 6,
     retryDelaySeconds: 600,
+    dialRatio: 1.0,
+    voicemailBehavior: 'hangup',
+    voicemailMessage: '',
     retellAgentId: null,
     retellSipAddress: null,
 };
@@ -81,6 +89,12 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
         if (!values.name.trim()) errs.name = 'Name is required';
         if (values.maxAttemptsPerLead < 1 || values.maxAttemptsPerLead > 20) errs.maxAttemptsPerLead = 'Must be between 1 and 20';
         if (values.maxConcurrentCalls < 0) errs.maxConcurrentCalls = 'Cannot be negative';
+        if (values.dialMode === 'progressive' && (values.dialRatio < 1.0 || values.dialRatio > 5.0)) {
+            errs.dialRatio = 'Must be between 1.0 and 5.0';
+        }
+        if (values.voicemailBehavior === 'leave_message' && !values.voicemailMessage.trim()) {
+            errs.voicemailMessage = 'Required when leaving a voicemail';
+        }
         if (values.dialMode === 'ai_autonomous' && !values.retellAgentId) {
             errs.retellAgentId = 'Pick a Retell agent';
         }
@@ -148,6 +162,66 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                         </div>
                         {fieldErrors.maxConcurrentCalls && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.maxConcurrentCalls}</div>}
                     </div>
+
+                    {values.dialMode === 'progressive' && (
+                        <div style={{ marginTop: 14 }}>
+                            <label>
+                                Dial Ratio: <strong>{values.dialRatio.toFixed(1)}x per agent</strong>
+                                {values.dialRatio === 1.0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}> (1:1, no power dialing)</span>}
+                            </label>
+                            <input
+                                type="range"
+                                min={1.0}
+                                max={5.0}
+                                step={0.5}
+                                value={values.dialRatio}
+                                onChange={e => set('dialRatio', parseFloat(e.target.value))}
+                                style={{ width: '100%' }}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.714rem', color: 'var(--text-muted)' }}>
+                                <span>1.0x</span><span>2.5x</span><span>5.0x</span>
+                            </div>
+                            <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                                Number of simultaneous outbound calls placed per available agent. Higher ratios connect agents to more live answers per hour but require power-dial routing (Phase 2 — coming soon). Setting above 1.0x updates dispatch capacity now and will activate multi-leg dialing once the worker ships.
+                            </div>
+                            {fieldErrors.dialRatio && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.dialRatio}</div>}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* VOICEMAIL HANDLING — progressive only (ai_autonomous lets the AI handle VM) */}
+            {values.dialMode === 'progressive' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>Voicemail Handling</div>
+                    <div>
+                        <label>When a machine is detected</label>
+                        <select
+                            className="select"
+                            value={values.voicemailBehavior}
+                            onChange={e => set('voicemailBehavior', e.target.value as VoicemailBehavior)}
+                        >
+                            <option value="hangup">Hang up silently (default)</option>
+                            <option value="leave_message">Leave a voicemail message</option>
+                        </select>
+                        <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                            Applied to power-dial legs that reach voicemail. AI Autonomous campaigns let the Retell agent handle voicemail directly.
+                        </div>
+                    </div>
+                    {values.voicemailBehavior === 'leave_message' && (
+                        <div style={{ marginTop: 10 }}>
+                            <label>Voicemail Message</label>
+                            <textarea
+                                className="input"
+                                rows={3}
+                                maxLength={500}
+                                placeholder="Hi, this is — please call us back at ..."
+                                value={values.voicemailMessage}
+                                onChange={e => set('voicemailMessage', e.target.value)}
+                            />
+                            {fieldErrors.voicemailMessage && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.voicemailMessage}</div>}
+                        </div>
+                    )}
                 </div>
             )}
 

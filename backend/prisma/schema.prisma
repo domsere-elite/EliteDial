@@ -278,6 +278,14 @@ model Campaign {
   maxAttemptsPerLead Int               @default(6)
   retryDelaySeconds  Int               @default(600)
   maxConcurrentCalls Int               @default(0)
+  // Power-dial multiplier applied to available human agents in progressive mode.
+  // 1.0 = strict 1:1 (default, current behaviour). >1 means multiple PSTN legs per agent
+  // with first-answer-wins routing handled in Phase 2 of the power-dial work.
+  dialRatio          Float             @default(1.0)
+  // Behaviour when SWML detect_machine reports a machine/voicemail.
+  // hangup = drop the call. leave_message = play voicemailMessage as TTS, then hang up.
+  voicemailBehavior  String            @default("hangup") // hangup | leave_message
+  voicemailMessage   String?           // TTS text used when voicemailBehavior = leave_message
   proximityMatchEnabled  Boolean           @default(true)
   autoRotateEnabled      Boolean           @default(true)
   maxCallsPerDIDPerDay   Int               @default(50)

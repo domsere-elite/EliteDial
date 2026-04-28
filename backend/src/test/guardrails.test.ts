@@ -121,3 +121,90 @@ test('queuePressure: activeCalls / maxConcurrentCalls for ai_autonomous', () => 
     });
     assert.equal(result.queuePressure, 0.4);
 });
+
+// ─── Progressive power-dial: dialRatio multiplies availableAgents ───
+
+test('progressive: dialRatio=2 doubles the base limit', () => {
+    const result = computeDialerGuardrails({
+        dialMode: 'progressive',
+        maxConcurrentCalls: 0,
+        availableAgents: 4,
+        activeCalls: 0,
+        dialRatio: 2.0,
+    });
+    assert.equal(result.baseConcurrentLimit, 8);
+    assert.equal(result.dispatchCapacity, 8);
+});
+
+test('progressive: dialRatio=2.5 floors to integer leg count', () => {
+    const result = computeDialerGuardrails({
+        dialMode: 'progressive',
+        maxConcurrentCalls: 0,
+        availableAgents: 3,
+        activeCalls: 0,
+        dialRatio: 2.5,
+    });
+    // floor(3 * 2.5) = 7
+    assert.equal(result.baseConcurrentLimit, 7);
+});
+
+test('progressive: dialRatio defaults to 1.0 when omitted', () => {
+    const result = computeDialerGuardrails({
+        dialMode: 'progressive',
+        maxConcurrentCalls: 0,
+        availableAgents: 4,
+        activeCalls: 0,
+    });
+    assert.equal(result.baseConcurrentLimit, 4);
+});
+
+test('progressive: dialRatio is clamped to [1.0, 5.0]', () => {
+    const tooLow = computeDialerGuardrails({
+        dialMode: 'progressive', maxConcurrentCalls: 0, availableAgents: 4, activeCalls: 0,
+        dialRatio: 0.1,
+    });
+    assert.equal(tooLow.baseConcurrentLimit, 4);
+
+    const tooHigh = computeDialerGuardrails({
+        dialMode: 'progressive', maxConcurrentCalls: 0, availableAgents: 4, activeCalls: 0,
+        dialRatio: 99,
+    });
+    // Clamped to 5 → 4 * 5 = 20
+    assert.equal(tooHigh.baseConcurrentLimit, 20);
+});
+
+test('progressive: maxConcurrentCalls still caps the multiplied limit', () => {
+    const result = computeDialerGuardrails({
+        dialMode: 'progressive',
+        maxConcurrentCalls: 5,
+        availableAgents: 4,
+        activeCalls: 0,
+        dialRatio: 3.0,
+    });
+    // floor(4 * 3) = 12, capped to 5
+    assert.equal(result.baseConcurrentLimit, 5);
+});
+
+test('progressive: dialRatio>1 with no agents still blocks with no_available_agents', () => {
+    const result = computeDialerGuardrails({
+        dialMode: 'progressive',
+        maxConcurrentCalls: 0,
+        availableAgents: 0,
+        activeCalls: 0,
+        dialRatio: 3.0,
+    });
+    assert.ok(result.blockedReasons.includes('no_available_agents'));
+    assert.equal(result.dispatchCapacity, 0);
+});
+
+test('queuePressure: progressive measures pressure against multiplied limit', () => {
+    const result = computeDialerGuardrails({
+        dialMode: 'progressive',
+        maxConcurrentCalls: 0,
+        availableAgents: 4,
+        activeCalls: 4,
+        dialRatio: 2.0,
+    });
+    // limit = 8, active = 4 → 0.5
+    assert.equal(result.queuePressure, 0.5);
+});
