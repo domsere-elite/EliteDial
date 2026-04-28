@@ -97,14 +97,10 @@ export default function DashboardPage() {
     const wasOnCallRef = useRef(false);
     const activeOutboundContextRef = useRef<{ toNumber: string; fromNumber: string } | null>(null);
 
-    /* ── SDK init is deferred to first dial ────────────────────────────
-     * Calling SignalWire({token}) on mount pre-creates an RTCPeerConnection
-     * pool while AudioContext is suspended and no mic permission exists.
-     * That pool's pre-created peer connection times out ICE gathering and
-     * is poisoned by the time client.dial() reuses it — the room session
-     * is returned in state "new" and never negotiates. dial() now lazy-
-     * inits the SDK AFTER AudioContext.resume() + getUserMedia, so the
-     * pool comes up in a valid audio context. */
+    /* ── Connect SDK on mount ─────────────────────────────────────── */
+    useEffect(() => {
+        sw.connect();
+    }, [sw]);
 
     /* ── Data fetching ─────────────────────────────────────────────── */
 

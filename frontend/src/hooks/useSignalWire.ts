@@ -155,37 +155,57 @@ export function useSignalWire() {
             }
 
             const client = await SignalWire({ token });
+            await client.online({
+                incomingCallHandlers: {
+                    all: async (notification) => {
+                        const details = notification.invite.details as unknown as Record<string, string | undefined>;
+                        const pending = pendingOutboundRef.current;
 
-            // The client is dial-capable as soon as SignalWire() resolves. Going
-            // online() is only required to receive incoming calls — outbound dial
-            // does not need it. Register the client and mark connected first so
-            // that a failure in online() (e.g. "WebRTC endpoint registration
-            // failed" when the subscriber is in a bad state) doesn't block
-            // outbound calling.
+                        if (inviteMatchesPending(details, pending) && pending) {
+                            // This SIP invite is the agent leg of an outbound we just placed.
+                            // Auto-accept silently — no UI prompt.
+                            pendingOutboundRef.current = null;
+                            try {
+                                const session = await notification.invite.accept({ audio: true, video: false, negotiateVideo: false });
+                                activeCallRef.current = session;
+                                activeBackendCallIdRef.current = pending.backendCallId;
+                                wireRoomEvents(session, pending.backendCallId);
+                                setState((prev) => ({
+                                    ...prev,
+                                    onCall: false,
+                                    ringing: true,
+                                    incomingCall: null,
+                                    callId: pending.backendCallId,
+                                    providerCallId: pending.providerCallId,
+                                    currentNumber: pending.toNumber,
+                                    error: '',
+                                }));
+                            } catch (err) {
+                                const message = err instanceof Error ? err.message : 'Unable to attach to outbound leg';
+                                void pushBrowserStatus(pending.backendCallId, { relayState: 'failed', details: { reason: message } });
+                                setState((prev) => ({ ...prev, ringing: false, error: message }));
+                            }
+                            return;
+                        }
+
+                        // Genuine inbound call → surface to UI for accept/reject.
+                        pendingInviteRef.current = notification;
+                        setState((prev) => ({
+                            ...prev,
+                            incomingCall: {
+                                callerName: details.caller_id_name || 'Unknown Caller',
+                                callerNumber: details.caller_id_number || 'Unknown Number',
+                                callSid: details.call_sid || details.call_id || details.sip_call_id,
+                                toNumber: details.destination_number || details.to,
+                            },
+                            error: '',
+                        }));
+                    },
+                },
+            });
+
             clientRef.current = client;
-            (window as unknown as { __sw?: SignalWireClient }).__sw = client;
             setState((prev) => ({ ...prev, connected: true, error: '' }));
-
-            // NOTE: client.online() is intentionally NOT called.
-            //
-            // online() registers the WebRTC endpoint to receive incoming calls.
-            // SignalWire's server has been rejecting that registration for this
-            // project's subscribers ({"code":-32603,"message":"WebRTC endpoint
-            // registration failed"}), and the SDK retries the registration in a
-            // tight loop that floods the JSON-RPC channel — which also breaks
-            // outbound dial because dial responses can't get through.
-            //
-            // Skipping online() means: outbound dial works (the documented
-            // pattern in SignalWire's webrtc-enabled-agent example does NOT
-            // call online()), but this browser cannot RECEIVE inbound calls
-            // until the registration issue is resolved (likely needs vendor
-            // support to fix subscriber config / WebRTC entitlement on the
-            // SignalWire space).
-            //
-            // To re-enable inbound: uncomment the block below once SignalWire
-            // confirms registration is working.
-            // -----------------------------------------------------------------
-            // void incomingCallHandlers;  // see below for the handler body
         } catch (err) {
             const responseStatus = (err as { response?: { status?: number; data?: { error?: string } } })?.response?.status;
             const responseError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
@@ -197,21 +217,25 @@ export function useSignalWire() {
     }, []);
 
     const dial = useCallback(async (toNumber: string): Promise<DialResult | null> => {
-        // Backend creates/updates a SWML Resource configured to connect to this
-        // specific destination, then returns its Fabric address (e.g.
-        // "/private/agent-dial-XYZ"). We dial that address; the SDK opens a
-        // WebRTC media path to SignalWire which executes the Resource's SWML
-        // and bridges to the PSTN destination.
-        let sessionResp: { callId: string; resourceAddress: string; fromNumber?: string };
+        if (!clientRef.current) {
+            await connect();
+        }
+        if (!clientRef.current) {
+            setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
+            return null;
+        }
+
+        // Server originates the call: SignalWire dials the agent's SIP first (this browser),
+        // then SWML bridges that leg to the PSTN destination. The agent's SDK will receive
+        // a SIP invite via incomingCallHandlers; the handler auto-accepts when it matches
+        // pendingOutboundRef. We do NOT call client.dial — Fabric's client.dial is for
+        // subscriber-to-subscriber addresses, not bare PSTN E.164.
+        let sessionResp: { callId: string; providerCallId?: string; fromNumber?: string };
         try {
             const { data } = await api.post('/calls/browser-session', { toNumber });
-            if (!data?.resourceAddress) {
-                setState((prev) => ({ ...prev, error: 'Backend did not provide a Fabric resource address' }));
-                return null;
-            }
             sessionResp = {
                 callId: data.callId,
-                resourceAddress: data.resourceAddress,
+                providerCallId: data.providerCallId,
                 fromNumber: data.fromNumber,
             };
         } catch (err) {
@@ -220,111 +244,30 @@ export function useSignalWire() {
             return null;
         }
 
-        const backendCallId = sessionResp.callId;
-        activeBackendCallIdRef.current = backendCallId;
+        if (!sessionResp.providerCallId) {
+            setState((prev) => ({ ...prev, error: 'Provider did not return a call identifier' }));
+            return null;
+        }
+
+        pendingOutboundRef.current = {
+            backendCallId: sessionResp.callId,
+            providerCallId: sessionResp.providerCallId,
+            toNumber,
+            fromNumber: sessionResp.fromNumber,
+            placedAt: Date.now(),
+        };
+        activeBackendCallIdRef.current = sessionResp.callId;
         setState((prev) => ({
             ...prev,
-            callId: backendCallId,
-            providerCallId: null,
+            callId: sessionResp.callId,
+            providerCallId: sessionResp.providerCallId || null,
             currentNumber: toNumber,
             ringing: true,
             error: '',
         }));
 
-        // CRITICAL ORDERING: AudioContext.resume() + getUserMedia must complete
-        // BEFORE SignalWire({token}) initializes its RTCPeerConnection pool.
-        // Otherwise the pool pre-creates peer connections while audio is
-        // suspended/no-mic-permission, ICE gathering times out, and the pool's
-        // pre-created PC is poisoned. client.dial() reuses that PC and returns
-        // a room session that stays at state "new" forever.
-        try {
-            const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-            // eslint-disable-next-line no-console
-            console.log('[SW-DIAL] AudioContext state before resume:', audioCtx.state);
-            if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
-                // eslint-disable-next-line no-console
-                console.log('[SW-DIAL] AudioContext resumed, state:', audioCtx.state);
-            }
-        } catch (e) {
-            // eslint-disable-next-line no-console
-            console.warn('[SW-DIAL] AudioContext resume failed:', e);
-        }
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            // eslint-disable-next-line no-console
-            console.log('[SW-DIAL] mic permission OK, tracks:', stream.getAudioTracks().map(t => t.label));
-            stream.getTracks().forEach(t => t.stop()); // release; SDK will request its own
-        } catch (e) {
-            const message = e instanceof Error ? e.message : 'Microphone permission denied';
-            // eslint-disable-next-line no-console
-            console.error('[SW-DIAL] mic permission failed:', e);
-            void pushBrowserStatus(backendCallId, { relayState: 'failed', details: { reason: 'mic_permission_denied' } });
-            cleanupActive();
-            setState((prev) => ({ ...prev, error: 'Microphone access required: ' + message }));
-            return null;
-        }
-
-        // Now that audio is ready, initialize the SDK if needed.
-        if (!clientRef.current) {
-            // eslint-disable-next-line no-console
-            console.log('[SW-DIAL] lazy-initializing SignalWire client (post-audio-ready)');
-            await connect();
-        }
-        const client = clientRef.current;
-        if (!client) {
-            setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
-            cleanupActive();
-            return null;
-        }
-
-        // eslint-disable-next-line no-console
-        console.log('[SW-DIAL] client.dial → address:', sessionResp.resourceAddress);
-        try {
-            const room = await client.dial({
-                to: sessionResp.resourceAddress,
-                audio: true,
-                video: false,
-            }) as FabricRoomSession;
-            // eslint-disable-next-line no-console
-            console.log('[SW-DIAL] dial returned room session, attaching events. roomId:', (room as unknown as { id?: string }).id, 'roomState:', (room as unknown as { state?: string }).state);
-            activeCallRef.current = room;
-            wireRoomEvents(room, backendCallId);
-            room.on('call.state', (s: unknown) => {
-                // eslint-disable-next-line no-console
-                console.log('[SW-DIAL] call.state →', s);
-            });
-            room.on('destroy', () => {
-                // eslint-disable-next-line no-console
-                console.log('[SW-DIAL] destroy');
-            });
-            (window as unknown as { __lastRoom?: unknown }).__lastRoom = room;
-            // Periodic state poll for 30s, in case events are lost
-            let ticks = 0;
-            const stateInterval = setInterval(() => {
-                ticks += 1;
-                const s = (room as unknown as { state?: string }).state;
-                // eslint-disable-next-line no-console
-                console.log('[SW-DIAL] periodic poll', ticks, 'state:', s);
-                if (ticks >= 6) clearInterval(stateInterval);
-            }, 5000);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'SignalWire dial failed';
-            // eslint-disable-next-line no-console
-            console.error('[SW-DIAL] threw:', err);
-            void pushBrowserStatus(backendCallId, { relayState: 'failed', details: { reason: message } });
-            cleanupActive();
-            setState((prev) => ({ ...prev, error: message }));
-            return null;
-        }
-
-        return {
-            callId: backendCallId,
-            providerCallId: undefined,
-            fromNumber: sessionResp.fromNumber,
-        };
-    }, [connect, cleanupActive, pushBrowserStatus, wireRoomEvents]);
+        return sessionResp;
+    }, [connect]);
 
     const acceptIncoming = useCallback(async () => {
         const invite = pendingInviteRef.current;
