@@ -134,7 +134,11 @@ export function useSignalWire() {
     }, []);
 
     const wireRoomEvents = useCallback((room: FabricRoomSession, backendCallId: string) => {
-        // CallState transitions: 'created' | 'ringing' | 'answered' | 'ending' | 'ended'
+        // CallState transitions: 'created' | 'ringing' | 'answered' | 'ending' | 'ended'.
+        // For the PSTN-first flow, the auto-accept handler optimistically sets
+        // onCall: true the moment accept() resolves (the bridge is already live by
+        // then). Don't regress that — only forward-transition: leave onCall sticky
+        // on intermediate states, and clear both flags on terminal states.
         room.on('call.state', (params: unknown) => {
             if (!isCallStateParams(params)) return;
             const callState = params.call_state || '';
@@ -146,12 +150,23 @@ export function useSignalWire() {
                 details: { transport: 'fabric-v3' },
             });
 
-            setState((prev) => ({
-                ...prev,
-                providerCallId: providerCallId || prev.providerCallId,
-                ringing: callState === 'created' || callState === 'ringing',
-                onCall: callState === 'answered',
-            }));
+            setState((prev) => {
+                const next = {
+                    ...prev,
+                    providerCallId: providerCallId || prev.providerCallId,
+                };
+                if (callState === 'answered') {
+                    next.onCall = true;
+                    next.ringing = false;
+                } else if (callState === 'ending' || callState === 'ended') {
+                    next.onCall = false;
+                    next.ringing = false;
+                } else if (!prev.onCall && (callState === 'created' || callState === 'ringing')) {
+                    // Only show "ringing" if we haven't already advanced to onCall.
+                    next.ringing = true;
+                }
+                return next;
+            });
         });
 
         room.on('call.left', () => {
