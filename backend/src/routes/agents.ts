@@ -81,7 +81,11 @@ router.get('/token/signalwire', authenticate, async (req: Request, res: Response
         return;
     }
 
-    const result = await signalwireService.generateBrowserToken(user.id, user.email, user.email, user.extension || user.id);
+    // Use email as endpointReference so SignalWire can store it as a valid email,
+    // PUT password idempotently, and derive a path-safe Fabric address /private/<local-part>.
+    // UUID-as-reference triggers the auto-create-without-password path that breaks
+    // WebRTC endpoint registration (-32603).
+    const result = await signalwireService.generateBrowserToken(user.id, user.email, user.email, user.email);
     if (!result.token) {
         if (result.error === 'subscriber_provisioning_disabled') {
             res.status(403).json({ error: 'SignalWire subscriber provisioning is disabled for new endpoints. Existing approved subscribers can still connect.' });

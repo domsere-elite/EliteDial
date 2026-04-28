@@ -429,9 +429,13 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
     const callMode = 'manual';
     const agentProfile = await prisma.profile.findUnique({
         where: { id: req.user!.id },
-        select: { id: true, extension: true },
+        select: { id: true, extension: true, email: true },
     });
-    const agentSipReference = agentProfile?.extension || req.user!.id;
+    // Fabric address path uses the email's local-part. SignalWire stores
+    // the auto-derived display_name = local-part of the subscriber's email,
+    // so /private/<local-part> resolves to sip:<local-part>@<project>.call.signalwire.com;context=private.
+    const emailForFabric = agentProfile?.email || req.user!.email || '';
+    const agentSipReference = agentProfile?.extension || emailForFabric.split('@')[0] || req.user!.id;
 
     const { call, session } = await callSessionService.createUnifiedCall({
         provider: 'signalwire',
