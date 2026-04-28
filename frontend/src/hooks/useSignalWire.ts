@@ -195,16 +195,29 @@ export function useSignalWire() {
                                 activeCallRef.current = session;
                                 activeBackendCallIdRef.current = pending.backendCallId;
                                 wireRoomEvents(session, pending.backendCallId);
+                                // PSTN-first flow: the customer has already answered before this
+                                // Fabric notification fires (the SWML's connect: only runs after
+                                // the customer's leg picks up). By the time accept() resolves,
+                                // the bridge is formed and audio is flowing. The v3 SDK doesn't
+                                // route call.state events for these calls to our room handler
+                                // ("Got an unknown fabric event" warning), so we won't get an
+                                // 'answered' state change — set onCall: true here directly so
+                                // the UI moves past "connecting" and the call timer starts.
                                 setState((prev) => ({
                                     ...prev,
-                                    onCall: false,
-                                    ringing: true,
+                                    onCall: true,
+                                    ringing: false,
                                     incomingCall: null,
                                     callId: pending.backendCallId,
                                     providerCallId: pending.providerCallId,
                                     currentNumber: pending.toNumber,
                                     error: '',
                                 }));
+                                void pushBrowserStatus(pending.backendCallId, {
+                                    providerCallId: pending.providerCallId,
+                                    relayState: 'in-progress',
+                                    details: { transport: 'fabric-pstn-first' },
+                                });
                             } catch (err) {
                                 const message = err instanceof Error ? err.message : 'Unable to attach to outbound leg';
                                 void pushBrowserStatus(pending.backendCallId, { relayState: 'failed', details: { reason: message } });
