@@ -302,6 +302,17 @@ export function useSignalWire() {
                         const batch = consumePendingPowerDialBatch();
                         if (batch) {
                             console.info('[useSignalWire] auto-accepting worker-originated bridge', { batchId: batch.batchId });
+                            // Show "connecting" state immediately. WebRTC negotiation
+                            // can take 2-5s and the customer will be on the line during
+                            // that window — the dialer needs to indicate the bridge is
+                            // forming so the agent doesn't think nothing happened.
+                            setState((prev) => ({
+                                ...prev,
+                                ringing: true,
+                                currentNumber: details.caller_id_number || details.from || '',
+                                providerCallId: details.call_id || null,
+                                error: '',
+                            }));
                             try {
                                 const session = await notification.invite.accept({ rootElement: ensureMediaRoot() });
                                 activeCallRef.current = session;
