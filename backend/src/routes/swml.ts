@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { callAuditService } from '../services/call-audit';
 import { callSessionService } from '../services/call-session-service';
 import { prisma } from '../lib/prisma';
+import { emitToUser } from '../lib/socket';
 import {
     inboundIvrSwml,
     ivrSelectionSwml,
@@ -91,6 +92,10 @@ const defaultEnsureInboundCallRecord = async (params: {
 export interface PowerDialClaimResult {
     won: boolean;
     targetRef: string | null; // populated when won
+    agentId: string | null;   // populated when won; needed for Socket.IO routing to the right user room
+    contactName: string | null;
+    contactPhone: string | null;
+    providerCallId: string | null; // the customer leg's provider call id (matched to Fabric invite call_id at the agent side)
 }
 
 export interface PowerDialVoicemailContext {
@@ -109,6 +114,19 @@ export interface SwmlRouteDeps {
     loadCampaignForVoicemail: (campaignId: string) => Promise<PowerDialVoicemailContext | null>;
     markPowerDialLegOverflow: (params: { legId: string; overflowTarget: 'ai' | 'hangup' }) => Promise<void>;
     markPowerDialLegMachine: (params: { legId: string; detectResult: string }) => Promise<void>;
+    // Phase 3a: when a leg wins the bridge, emit a Socket.IO event to the
+    // agent's user room with customer info so the dashboard renders the
+    // customer's name/phone instead of the SIP-ish details from the Fabric
+    // invite. The auto-accept handler in useSignalWire stores this and uses
+    // it at bridge-arrival time.
+    notifyAgentOfBridgeWinner: (params: {
+        agentId: string;
+        batchId: string;
+        legId: string;
+        contactName: string | null;
+        contactPhone: string | null;
+        providerCallId: string | null;
+    }) => Promise<void>;
 }
 
 const defaultLoadCampaignForBridge = async (
@@ -133,7 +151,8 @@ const defaultClaimPowerDialLeg = async (params: {
     batchId: string;
     legId: string;
 }): Promise<PowerDialClaimResult> => {
-    if (!params.batchId || !params.legId) return { won: false, targetRef: null };
+    const empty: PowerDialClaimResult = { won: false, targetRef: null, agentId: null, contactName: null, contactPhone: null, providerCallId: null };
+    if (!params.batchId || !params.legId) return empty;
 
     const claimed = await prisma.$queryRaw<Array<{ id: string }>>`
         UPDATE "PowerDialLeg"
@@ -151,12 +170,17 @@ const defaultClaimPowerDialLeg = async (params: {
     `;
 
     if (claimed.length === 0) {
-        return { won: false, targetRef: null };
+        return { ...empty, won: false };
     }
 
-    const batch = await prisma.powerDialBatch.findUnique({
-        where: { id: params.batchId },
-        select: { targetRef: true },
+    // Single roundtrip to fetch everything the SWML route + Socket.IO emit need.
+    const leg = await prisma.powerDialLeg.findUnique({
+        where: { id: params.legId },
+        select: {
+            providerCallId: true,
+            contact: { select: { primaryPhone: true, firstName: true, lastName: true } },
+            batch: { select: { agentId: true, targetRef: true } },
+        },
     });
 
     // Mark the batch as claimed for observability; non-blocking on failure.
@@ -165,7 +189,32 @@ const defaultClaimPowerDialLeg = async (params: {
         data: { status: 'claimed', claimedAt: new Date() },
     }).catch((err) => logger.warn('Failed to mark batch claimed', { batchId: params.batchId, err }));
 
-    return { won: true, targetRef: batch?.targetRef || null };
+    const fullName = [leg?.contact?.firstName, leg?.contact?.lastName].filter(Boolean).join(' ').trim();
+    return {
+        won: true,
+        targetRef: leg?.batch?.targetRef || null,
+        agentId: leg?.batch?.agentId || null,
+        contactName: fullName || null,
+        contactPhone: leg?.contact?.primaryPhone || null,
+        providerCallId: leg?.providerCallId || null,
+    };
+};
+
+const defaultNotifyAgentOfBridgeWinner = async (params: {
+    agentId: string;
+    batchId: string;
+    legId: string;
+    contactName: string | null;
+    contactPhone: string | null;
+    providerCallId: string | null;
+}): Promise<void> => {
+    emitToUser(params.agentId, 'power_dial.bridge.winner', {
+        batchId: params.batchId,
+        legId: params.legId,
+        contactName: params.contactName,
+        contactPhone: params.contactPhone,
+        providerCallId: params.providerCallId,
+    });
 };
 
 const defaultLoadCampaignForOverflow = async (
@@ -231,6 +280,7 @@ const defaultDeps: SwmlRouteDeps = {
     loadCampaignForVoicemail: defaultLoadCampaignForVoicemail,
     markPowerDialLegOverflow: defaultMarkPowerDialLegOverflow,
     markPowerDialLegMachine: defaultMarkPowerDialLegMachine,
+    notifyAgentOfBridgeWinner: defaultNotifyAgentOfBridgeWinner,
 };
 
 export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
@@ -401,9 +451,28 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
             if (result.won && result.targetRef) {
                 await deps.callAuditTrack({
                     type: 'power_dial.bridge.claimed',
-                    details: { batchId, legId, targetRef: result.targetRef },
+                    details: {
+                        batchId,
+                        legId,
+                        targetRef: result.targetRef,
+                        contactName: result.contactName,
+                        contactPhone: result.contactPhone,
+                    },
                     source: 'signalwire.power_dial_claim',
                 });
+                if (result.agentId) {
+                    // Fire-and-forget: dashboard pre-arms with customer info so
+                    // the auto-accept handler shows the real customer instead of
+                    // SIP-ish caller_id details from the Fabric notification.
+                    void deps.notifyAgentOfBridgeWinner({
+                        agentId: result.agentId,
+                        batchId,
+                        legId,
+                        contactName: result.contactName,
+                        contactPhone: result.contactPhone,
+                        providerCallId: result.providerCallId,
+                    });
+                }
                 res.json({ outcome: 'bridge' });
                 return;
             }

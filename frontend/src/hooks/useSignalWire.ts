@@ -50,6 +50,19 @@ interface PendingPowerDialBatch {
     receivedAt: number;
 }
 
+// Customer info for the leg that won the bridge race. Backend emits this from
+// /swml/power-dial/claim the moment the atomic claim succeeds (~150ms after
+// customer answer), so it lands in the browser before the Fabric bridge
+// notification arrives (~3-5s later via SignalWire's bridge dispatch).
+interface PendingPowerDialWinner {
+    batchId: string;
+    legId: string;
+    contactName: string | null;
+    contactPhone: string | null;
+    providerCallId: string | null;
+    receivedAt: number;
+}
+
 type CallStateEventParams = { call_state?: string; call_id?: string };
 
 const isCallStateParams = (value: unknown): value is CallStateEventParams =>
@@ -92,6 +105,7 @@ export function useSignalWire() {
     const pendingInviteRef = useRef<IncomingCallNotification | null>(null);
     const pendingOutboundRef = useRef<PendingOutbound | null>(null);
     const pendingPowerDialBatchesRef = useRef<PendingPowerDialBatch[]>([]);
+    const pendingPowerDialWinnersRef = useRef<PendingPowerDialWinner[]>([]);
 
     // Subscribe to power_dial.batch.dispatched events. Worker fires this BEFORE
     // it originates the legs, so by the time the customer's leg AMD-detects
@@ -99,10 +113,9 @@ export function useSignalWire() {
     // is already populated and the invite handler auto-accepts silently.
     const realtime = useRealtime();
     useEffect(() => {
-        const handler = (...args: unknown[]) => {
+        const dispatchHandler = (...args: unknown[]) => {
             const payload = args[0] as { batchId?: string; targetRef?: string; expiresAt?: string } | undefined;
             if (!payload?.batchId || !payload?.targetRef || !payload?.expiresAt) return;
-            // Drop expired entries first to keep the array small.
             const now = Date.now();
             pendingPowerDialBatchesRef.current = pendingPowerDialBatchesRef.current.filter((b) => b.expiresAt > now);
             pendingPowerDialBatchesRef.current.push({
@@ -113,16 +126,49 @@ export function useSignalWire() {
             });
             console.info('[useSignalWire] power-dial batch armed', payload);
         };
-        realtime.on('power_dial.batch.dispatched', handler);
-        return () => realtime.off('power_dial.batch.dispatched', handler);
+
+        // Backend's /swml/power-dial/claim emits this when a leg wins the
+        // bridge claim. Carries the customer's name + phone so the dashboard
+        // can render the actual customer instead of the Fabric SIP-ish
+        // caller_id_number when the bridge invite arrives ~3-5s later.
+        const winnerHandler = (...args: unknown[]) => {
+            const payload = args[0] as PendingPowerDialWinner | undefined;
+            if (!payload?.batchId || !payload?.legId) return;
+            // Keep only the most-recent winner per batch.
+            const now = Date.now();
+            pendingPowerDialWinnersRef.current = pendingPowerDialWinnersRef.current.filter(
+                (w) => w.batchId !== payload.batchId && now - w.receivedAt < 60_000,
+            );
+            pendingPowerDialWinnersRef.current.push({ ...payload, receivedAt: now });
+            console.info('[useSignalWire] power-dial bridge winner', payload);
+        };
+
+        realtime.on('power_dial.batch.dispatched', dispatchHandler);
+        realtime.on('power_dial.bridge.winner', winnerHandler);
+        return () => {
+            realtime.off('power_dial.batch.dispatched', dispatchHandler);
+            realtime.off('power_dial.bridge.winner', winnerHandler);
+        };
     }, [realtime]);
 
     function consumePendingPowerDialBatch(): PendingPowerDialBatch | null {
         const now = Date.now();
-        // Drop expired.
         pendingPowerDialBatchesRef.current = pendingPowerDialBatchesRef.current.filter((b) => b.expiresAt > now);
         const next = pendingPowerDialBatchesRef.current.shift() || null;
         return next;
+    }
+
+    function consumePowerDialWinner(batchId: string | null): PendingPowerDialWinner | null {
+        const now = Date.now();
+        pendingPowerDialWinnersRef.current = pendingPowerDialWinnersRef.current.filter((w) => now - w.receivedAt < 60_000);
+        if (!batchId) {
+            // No batch known — return the most recent winner if any (fallback).
+            return pendingPowerDialWinnersRef.current[pendingPowerDialWinnersRef.current.length - 1] || null;
+        }
+        const idx = pendingPowerDialWinnersRef.current.findIndex((w) => w.batchId === batchId);
+        if (idx < 0) return null;
+        const [winner] = pendingPowerDialWinnersRef.current.splice(idx, 1);
+        return winner;
     }
 
     const pushBrowserStatus = useCallback(async (callId: string, payload: {
@@ -301,24 +347,30 @@ export function useSignalWire() {
                         // silently so the agent is connected without a UI prompt.
                         const batch = consumePendingPowerDialBatch();
                         if (batch) {
-                            console.info('[useSignalWire] auto-accepting worker-originated bridge', { batchId: batch.batchId });
-                            // Show "connecting" state immediately. WebRTC negotiation
-                            // can take 2-5s and the customer will be on the line during
-                            // that window — the dialer needs to indicate the bridge is
-                            // forming so the agent doesn't think nothing happened.
+                            // Look up the winner (customer name + phone) the backend
+                            // emitted from /swml/power-dial/claim. This typically
+                            // arrives ~3-5s before the bridge invite (Socket.IO is
+                            // faster than the bridge dispatch). If it's missing, fall
+                            // back to whatever the Fabric details give us.
+                            const winner = consumePowerDialWinner(batch.batchId);
+                            const displayNumber = winner?.contactPhone || details.caller_id_number || details.from || '';
+                            const displayName = winner?.contactName || details.caller_id_name || '';
+                            console.info('[useSignalWire] auto-accepting worker-originated bridge', {
+                                batchId: batch.batchId,
+                                winnerKnown: !!winner,
+                                contactName: winner?.contactName,
+                                contactPhone: winner?.contactPhone,
+                            });
                             setState((prev) => ({
                                 ...prev,
                                 ringing: true,
-                                currentNumber: details.caller_id_number || details.from || '',
-                                providerCallId: details.call_id || null,
+                                currentNumber: displayNumber,
+                                providerCallId: winner?.providerCallId || details.call_id || null,
                                 error: '',
                             }));
                             try {
                                 const session = await notification.invite.accept({ rootElement: ensureMediaRoot() });
                                 activeCallRef.current = session;
-                                // No backendCallId for power-dial bridges — the
-                                // worker writes its own audit trail; we just
-                                // need the active session for hangup/UI.
                                 activeBackendCallIdRef.current = null;
                                 wireRoomEvents(session, '');
                                 setState((prev) => ({
@@ -327,10 +379,12 @@ export function useSignalWire() {
                                     ringing: false,
                                     incomingCall: null,
                                     callId: null,
-                                    providerCallId: details.call_id || null,
-                                    currentNumber: details.caller_id_number || '',
+                                    providerCallId: winner?.providerCallId || details.call_id || null,
+                                    currentNumber: displayNumber,
                                     error: '',
                                 }));
+                                // Mute warning on unused name (we surface it via state.currentNumber for now).
+                                void displayName;
                             } catch (err) {
                                 const message = err instanceof Error ? err.message : 'Unable to attach to power-dial bridge';
                                 console.error('[useSignalWire] power-dial bridge accept failed', err);

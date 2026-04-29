@@ -343,16 +343,14 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
     const willLeaveMessage = p.voicemailBehavior === 'leave_message' && !!(p.voicemailMessage && p.voicemailMessage.length > 0);
 
     // Bridge target is statically known at origination time, so we hard-code it
-    // into the bridge section. Overflow target similarly.
+    // into the bridge section.
     //
-    // The leading TTS is critical UX for power-dial: AMD ran for 5-7s on a
-    // silent line BEFORE the bridge fires, then the agent's browser needs
-    // ~2-3s to negotiate WebRTC. Without audio masking, the customer hears
-    // 7-10s of silence (or worse, ringback if answer_on_bridge plays one)
-    // and tends to hang up. The play step gives them a clear cue that
-    // someone is coming, and runs in parallel with the WebRTC negotiation.
+    // No TTS hold here — Phase 3a (skipAmd=true) gets the customer to the
+    // bridge in <1s of post-answer time, and the WebRTC negotiation completes
+    // within 3-5s. The agent's softphone audio is up before the customer
+    // notices any silence. If WebRTC ever regresses or AMD is re-enabled
+    // (skipAmd=false), the play step would need to come back.
     const bridgeSection: SwmlStep[] = [
-        { play: { url: 'say:One moment please, connecting you now.' } },
         {
             connect: {
                 to: `/private/${p.targetRef}`,

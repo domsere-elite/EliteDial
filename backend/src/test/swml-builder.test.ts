@@ -238,22 +238,17 @@ test('swml-builder: powerDialDetectSwml — leave_message without message degrad
     assert.ok(steps.some((s: any) => s.hangup !== undefined), 'still hangs up cleanly');
 });
 
-test('swml-builder: powerDialDetectSwml — bridge section plays connecting TTS, then connects to /private/<targetRef>', () => {
+test('swml-builder: powerDialDetectSwml — bridge section connects to /private/<targetRef> with no TTS hold', () => {
     const doc = powerDialDetectSwml({ ...baseDetectParams, targetRef: 'dominic' });
     const bridge = doc.sections.bridge as any[];
     assert.ok(bridge, 'bridge section present');
 
-    // Connecting TTS comes BEFORE the connect step. This is required UX:
-    // 7-10s of silence between AMD finishing and WebRTC bridging makes
-    // customers hang up. The play step masks the negotiation delay.
-    const playIdx = bridge.findIndex((s: any) => s.play !== undefined);
-    const connectIdx = bridge.findIndex((s: any) => s.connect !== undefined);
-    assert.ok(playIdx >= 0, 'play step present');
-    assert.ok(connectIdx >= 0, 'connect step present');
-    assert.ok(playIdx < connectIdx, 'play comes before connect');
-    assert.match(bridge[playIdx].play.url, /^say:/, 'TTS via play.url: say: form');
+    // skipAmd=true gets customer to bridge in <1s, WebRTC completes in ~3s,
+    // so no TTS audio masking is needed. Bridge is just connect + hangup.
+    assert.ok(!bridge.some((s: any) => s.play !== undefined), 'no TTS hold (was needed for AMD path; not for skipAmd path)');
 
-    const connect = bridge[connectIdx];
+    const connect = bridge.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present');
     assert.equal(connect.connect.to, '/private/dominic');
     assert.equal(connect.connect.from, undefined, 'no from: — mirrors working softphone shape');
     assert.equal(connect.connect.answer_on_bridge, true);

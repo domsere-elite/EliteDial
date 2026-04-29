@@ -18,11 +18,12 @@ function mkDeps(overrides: Partial<SwmlRouteDeps> = {}): SwmlRouteDeps {
         reserveAvailableAgent: fakeReserve,
         callAuditTrack: noopTrack,
         loadCampaignForBridge: fakeLoadCampaign,
-        claimPowerDialLeg: async () => ({ won: false, targetRef: null }),
+        claimPowerDialLeg: async () => ({ won: false, targetRef: null, agentId: null, contactName: null, contactPhone: null, providerCallId: null }),
         loadCampaignForOverflow: async () => null,
         loadCampaignForVoicemail: async () => null,
         markPowerDialLegOverflow: async () => undefined,
         markPowerDialLegMachine: async () => undefined,
+        notifyAgentOfBridgeWinner: async () => undefined,
         ...overrides,
     };
 }
@@ -214,13 +215,22 @@ function makePowerDialApp(deps: SwmlRouteDeps): express.Express {
     return a;
 }
 
-test('swml-routes: /power-dial/claim — winner returns { outcome: "bridge" }', async () => {
+test('swml-routes: /power-dial/claim — winner returns { outcome: "bridge" } and notifies the agent with customer info', async () => {
     const calls: any[] = [];
+    const notifications: any[] = [];
     const a = makePowerDialApp(mkDeps({
         claimPowerDialLeg: async ({ batchId, legId }) => {
             calls.push({ batchId, legId });
-            return { won: true, targetRef: 'dominic' };
+            return {
+                won: true,
+                targetRef: 'dominic',
+                agentId: 'agent-uuid-1',
+                contactName: 'John Doe',
+                contactPhone: '+15551234567',
+                providerCallId: 'pcid-99',
+            };
         },
+        notifyAgentOfBridgeWinner: async (params) => { notifications.push(params); },
     }));
 
     const res = await request(a)
@@ -230,12 +240,23 @@ test('swml-routes: /power-dial/claim — winner returns { outcome: "bridge" }', 
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, { outcome: 'bridge' });
     assert.deepEqual(calls, [{ batchId: 'batch-1', legId: 'leg-1' }]);
+    // Allow the fire-and-forget Socket.IO emit to flush.
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(notifications.length, 1);
+    assert.deepEqual(notifications[0], {
+        agentId: 'agent-uuid-1',
+        batchId: 'batch-1',
+        legId: 'leg-1',
+        contactName: 'John Doe',
+        contactPhone: '+15551234567',
+        providerCallId: 'pcid-99',
+    });
 });
 
 test('swml-routes: /power-dial/claim — race loser with retellSipAddress returns { outcome: "overflow" }', async () => {
     let overflowMarked: any = null;
     const a = makePowerDialApp(mkDeps({
-        claimPowerDialLeg: async () => ({ won: false, targetRef: null }),
+        claimPowerDialLeg: async () => ({ won: false, targetRef: null, agentId: null, contactName: null, contactPhone: null, providerCallId: null }),
         loadCampaignForOverflow: async (id) =>
             id === 'c-1' ? { retellSipAddress: 'sip:agent_x@retell.example' } : null,
         markPowerDialLegOverflow: async (params) => { overflowMarked = params; },
@@ -253,7 +274,7 @@ test('swml-routes: /power-dial/claim — race loser with retellSipAddress return
 test('swml-routes: /power-dial/claim — race loser without retellSipAddress returns { outcome: "hangup" }', async () => {
     let overflowMarked: any = null;
     const a = makePowerDialApp(mkDeps({
-        claimPowerDialLeg: async () => ({ won: false, targetRef: null }),
+        claimPowerDialLeg: async () => ({ won: false, targetRef: null, agentId: null, contactName: null, contactPhone: null, providerCallId: null }),
         loadCampaignForOverflow: async () => ({ retellSipAddress: null }),
         markPowerDialLegOverflow: async (params) => { overflowMarked = params; },
     }));
