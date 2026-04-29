@@ -293,33 +293,117 @@ export function bridgeOutboundAiSwml(params: BridgeOutboundAiParams): SwmlDocume
 }
 
 // --- Power-dial Phase 2 builders --------------------------------------------
-// detect_machine smoke test on executive-strategy.signalwire.com confirmed:
-//   - The verb is enabled and `wait: true` blocks until detection completes.
-//   - `cond` branches on `detect_result` work as documented.
-//   - Anything not 'human' (machine, fax, unknown) is folded into the
-//     non-human branch in the call paths below — that matches the spec
-//     ("else" → voicemail/hangup).
+// Architecture note (validated by smoke #2 failure analysis):
+//
+// SWML's `request:` verb is a SIDE-EFFECT HTTP call. Its response body is
+// stored in `%{request_response.<field>}` variables (when save_variables is
+// true) and execution continues with the NEXT step in the same SWML doc. The
+// response body is NOT executed as SWML continuation — that was the broken
+// assumption in the first design. So all routing must live in inline SWML
+// sections at origination time; the HTTP callbacks just return data values
+// the SWML branches on.
+//
+// Layout:
+//   main           → answer + detect_machine + cond on detect_result
+//                    human  → request claim, switch on outcome → goto bridge|overflow|hangup_now
+//                    other  → fire-and-forget voicemail audit, then cond on bake-time
+//                            voicemailBehavior → leave_message (TTS) or hangup
+//   bridge         → connect /private/<targetRef> (the agent's softphone)
+//   overflow_ai    → connect <retellSipAddress> (only if campaign has one)
+//   hangup_now     → terminal hangup
+//
+// All campaign-time-known config (targetRef, retellSipAddress,
+// voicemailMessage) is baked into the SWML at origination so we don't need
+// runtime callbacks for routing decisions — only for the atomic claim race.
 
 export interface PowerDialDetectParams {
     claimUrl: string;     // absolute URL to /swml/power-dial/claim
-    voicemailUrl: string; // absolute URL to /swml/power-dial/voicemail
+    voicemailUrl: string; // absolute URL to /swml/power-dial/voicemail (audit only)
     batchId: string;
     legId: string;
     campaignId: string;
-    // The worker knows the DID it originated with (per-campaign DID routing
-    // means it can vary). Threading it through the URL means the claim/
-    // voicemail routes don't need to re-derive a default.
-    callerId: string;
+    callerId: string;     // DID, threaded into URL params
+    targetRef: string;    // agent email local-part for /private/<ref>
+    retellSipAddress?: string | null; // campaign's AI overflow target, if configured
+    voicemailBehavior: 'hangup' | 'leave_message';
+    voicemailMessage?: string | null;
 }
 
-// Inline SWML for the customer leg POSTed to /api/calling/calls.
-// Flow: answer → detect_machine (AMD, wait for result) → branch on detect_result.
-// Human → /swml/power-dial/claim (server decides bridge-or-overflow atomically).
-// Anything else → /swml/power-dial/voicemail (hangup or leave_message per campaign).
 export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
-    const cid = encodeURIComponent(p.callerId);
-    const claimUrl = `${p.claimUrl}?batchId=${encodeURIComponent(p.batchId)}&legId=${encodeURIComponent(p.legId)}&campaignId=${encodeURIComponent(p.campaignId)}&callerId=${cid}`;
+    const claimUrl = `${p.claimUrl}?batchId=${encodeURIComponent(p.batchId)}&legId=${encodeURIComponent(p.legId)}&campaignId=${encodeURIComponent(p.campaignId)}&callerId=${encodeURIComponent(p.callerId)}`;
     const voicemailUrl = `${p.voicemailUrl}?campaignId=${encodeURIComponent(p.campaignId)}&legId=${encodeURIComponent(p.legId)}`;
+
+    const hasRetell = !!(p.retellSipAddress && p.retellSipAddress.length > 0);
+    const willLeaveMessage = p.voicemailBehavior === 'leave_message' && !!(p.voicemailMessage && p.voicemailMessage.length > 0);
+
+    // Bridge target is statically known at origination time, so we hard-code it
+    // into the bridge section. Overflow target similarly.
+    const bridgeSection: SwmlStep[] = [
+        {
+            connect: {
+                to: `/private/${p.targetRef}`,
+                timeout: 30,
+                answer_on_bridge: true,
+            },
+        },
+        { hangup: {} },
+    ];
+
+    const overflowAiSection: SwmlStep[] = hasRetell
+        ? [
+            {
+                connect: {
+                    to: p.retellSipAddress!,
+                    timeout: 30,
+                    answer_on_bridge: true,
+                },
+            },
+            { hangup: {} },
+        ]
+        : [{ hangup: {} }];
+
+    const hangupNowSection: SwmlStep[] = [{ hangup: {} }];
+
+    // After the claim request, branch on the JSON outcome the route returned.
+    // The route returns one of: bridge | overflow | hangup. Anything else
+    // (network error, response missing) falls into the default → hangup_now.
+    const claimBranch: SwmlStep[] = [
+        {
+            request: {
+                url: claimUrl,
+                method: 'POST',
+                save_variables: true,
+                timeout: 10,
+            },
+        },
+        {
+            switch: {
+                variable: 'request_response.outcome',
+                case: {
+                    bridge: [{ transfer: 'bridge' }],
+                    overflow: [{ transfer: 'overflow_ai' }],
+                    hangup: [{ transfer: 'hangup_now' }],
+                },
+                default: [{ transfer: 'hangup_now' }],
+            },
+        },
+    ];
+
+    // Non-human (machine/fax/unknown) branch. Fire-and-forget the voicemail
+    // audit (no save_variables — we don't need the response). Then play the
+    // TTS message if configured, else hangup. voicemailMessage is baked at
+    // origination from campaign config.
+    const voicemailBranch: SwmlStep[] = willLeaveMessage
+        ? [
+            { request: { url: voicemailUrl, method: 'POST', timeout: 5 } },
+            { play: { url: `say:${p.voicemailMessage}` } },
+            { hangup: {} },
+        ]
+        : [
+            { request: { url: voicemailUrl, method: 'POST', timeout: 5 } },
+            { hangup: {} },
+        ];
+
     return {
         version: '1.0.0',
         sections: {
@@ -334,95 +418,14 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
                 },
                 {
                     cond: [
-                        {
-                            when: "detect_result == 'human'",
-                            then: [
-                                { request: { url: claimUrl, method: 'POST' } },
-                            ],
-                        },
-                        {
-                            else: [
-                                { request: { url: voicemailUrl, method: 'POST' } },
-                            ],
-                        },
+                        { when: "detect_result == 'human'", then: claimBranch },
+                        { else: voicemailBranch },
                     ],
                 },
             ],
+            bridge: bridgeSection,
+            overflow_ai: overflowAiSection,
+            hangup_now: hangupNowSection,
         },
     };
-}
-
-export interface PowerDialBridgeAgentParams {
-    targetRef: string; // email local-part used at /private/<ref>
-    callerId: string;  // DID for caller_id presentation; carries through bridge
-}
-
-// Returned from /swml/power-dial/claim when a leg wins the race for the agent slot.
-// Connects the customer to the agent's Fabric address. Mirrors the working
-// softphone outbound exactly: no `from:` on connect, no record_call here (that
-// was tripping the Fabric bridge in the Phase 2 smoke; the working softphone
-// outbound omits both). callerId is kept on the params for symmetry but unused;
-// SignalWire propagates the customer leg's existing caller_id through the bridge.
-export function powerDialBridgeAgentSwml(p: PowerDialBridgeAgentParams): SwmlDocument {
-    return {
-        version: '1.0.0',
-        sections: {
-            main: [
-                {
-                    connect: {
-                        to: `/private/${p.targetRef}`,
-                        timeout: 30,
-                        answer_on_bridge: true,
-                    },
-                },
-                { hangup: {} },
-            ],
-        },
-    };
-}
-
-export interface PowerDialOverflowParams {
-    mode: 'ai' | 'hangup' | 'leave_message';
-    retellSipAddress?: string;
-    callerId?: string;
-    voicemailMessage?: string;
-}
-
-// Returned from /swml/power-dial/claim for race losers, and from
-// /swml/power-dial/voicemail for non-human detect results when the campaign
-// has voicemailBehavior='leave_message'. For 'hangup' (or any incomplete
-// config — missing retellSipAddress, missing voicemailMessage), falls back
-// to a clean hangup.
-export function powerDialOverflowSwml(p: PowerDialOverflowParams): SwmlDocument {
-    if (p.mode === 'ai' && p.retellSipAddress && p.callerId) {
-        return {
-            version: '1.0.0',
-            sections: {
-                main: [
-                    {
-                        connect: {
-                            to: p.retellSipAddress,
-                            from: p.callerId,
-                            timeout: 30,
-                            answer_on_bridge: true,
-                        },
-                        on_failure: [{ hangup: {} }],
-                    },
-                    { record_call: { stereo: true, format: 'mp3' } },
-                ],
-            },
-        };
-    }
-    if (p.mode === 'leave_message' && p.voicemailMessage) {
-        return {
-            version: '1.0.0',
-            sections: {
-                main: [
-                    { play: { url: `say:${p.voicemailMessage}` } },
-                    { hangup: {} },
-                ],
-            },
-        };
-    }
-    return hangupSwml();
 }

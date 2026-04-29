@@ -14,8 +14,6 @@ import {
     bridgeOutboundAiSwml,
     transferSwml,
     hangupSwml,
-    powerDialBridgeAgentSwml,
-    powerDialOverflowSwml,
 } from '../services/swml/builder';
 
 const backendBase = (req: Request): string =>
@@ -374,23 +372,26 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
     });
 
     // ---- Power-dial Phase 2 routes ------------------------------------------
+    //
+    // These routes are NOT SWML continuations — SWML's `request:` verb is a
+    // side-effect HTTP call whose response body is stored as variables (with
+    // save_variables: true) and accessed via %{request_response.<field>}.
+    // The customer leg's inline SWML (powerDialDetectSwml) reads the JSON
+    // `outcome` field below and branches via `switch:` + `transfer:` to its
+    // own bridge/overflow_ai/hangup_now sections.
 
     // POST /swml/power-dial/claim
-    // The customer leg's SWML branched to 'human' and is now requesting routing.
-    // We run an atomic claim against the batch; the first leg to win gets the
-    // agent bridge, others overflow to AI (when configured) or hang up.
+    //   Returns: { outcome: 'bridge' | 'overflow' | 'hangup' }
+    // The atomic claim row update decides the outcome. Race winner → bridge.
+    // Race loser with a configured retellSipAddress → overflow. Otherwise hangup.
     router.post('/power-dial/claim', async (req: Request, res: Response): Promise<void> => {
         const batchId = (req.query.batchId as string) || '';
         const legId = (req.query.legId as string) || '';
         const campaignId = (req.query.campaignId as string) || '';
-        // callerId comes from the worker via the SWML detect URL (see
-        // powerDialDetectSwml). Falling back to the configured default DID lets
-        // tests + legacy paths still work.
-        const callerId = (req.query.callerId as string) || config.telephony.defaultOutboundNumber || '';
 
         if (!batchId || !legId) {
             logger.warn('swml.power-dial/claim: missing batchId/legId, returning hangup', { batchId, legId });
-            res.json(hangupSwml());
+            res.json({ outcome: 'hangup' });
             return;
         }
 
@@ -403,28 +404,20 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
                     details: { batchId, legId, targetRef: result.targetRef },
                     source: 'signalwire.power_dial_claim',
                 });
-                res.json(powerDialBridgeAgentSwml({
-                    targetRef: result.targetRef,
-                    callerId,
-                }));
+                res.json({ outcome: 'bridge' });
                 return;
             }
 
-            // Race lost. Fall back to AI overflow if the campaign has one,
-            // otherwise hang up cleanly.
+            // Race lost.
             const campaign = campaignId ? await deps.loadCampaignForOverflow(campaignId) : null;
-            if (campaign?.retellSipAddress && callerId) {
+            if (campaign?.retellSipAddress) {
                 await deps.markPowerDialLegOverflow({ legId, overflowTarget: 'ai' });
                 await deps.callAuditTrack({
                     type: 'power_dial.bridge.overflow_ai',
                     details: { batchId, legId, retellSipAddress: campaign.retellSipAddress },
                     source: 'signalwire.power_dial_claim',
                 });
-                res.json(powerDialOverflowSwml({
-                    mode: 'ai',
-                    retellSipAddress: campaign.retellSipAddress,
-                    callerId,
-                }));
+                res.json({ outcome: 'overflow' });
                 return;
             }
 
@@ -434,54 +427,41 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
                 details: { batchId, legId, reason: campaign ? 'no_retell_address' : 'no_campaign' },
                 source: 'signalwire.power_dial_claim',
             });
-            res.json(hangupSwml());
+            res.json({ outcome: 'hangup' });
         } catch (err) {
             logger.error('swml.power-dial/claim error — returning hangup', { batchId, legId, err });
-            res.json(hangupSwml());
+            res.json({ outcome: 'hangup' });
         }
     });
 
     // POST /swml/power-dial/voicemail
-    // The customer leg's SWML branched non-human (machine, fax, unknown).
-    // Per campaign config: hang up silently or play voicemailMessage as TTS.
+    //   Audit-only. The customer-leg SWML already knows the campaign's
+    //   voicemailBehavior (baked at origination) and decides locally whether
+    //   to play TTS. We just record that this leg hit voicemail.
+    //   Response body is unused by SWML; we return a small JSON ack so the
+    //   route is observable for log-grepping.
     router.post('/power-dial/voicemail', async (req: Request, res: Response): Promise<void> => {
         const campaignId = (req.query.campaignId as string) || '';
         const legId = (req.query.legId as string) || '';
 
         if (!legId) {
-            logger.warn('swml.power-dial/voicemail: missing legId, returning hangup', { campaignId, legId });
-            res.json(hangupSwml());
+            logger.warn('swml.power-dial/voicemail: missing legId', { campaignId, legId });
+            res.json({ ack: false });
             return;
         }
 
         try {
-            // Best-effort: capture the detect_result if SignalWire posted it in the body.
             const detectResult = (req.body?.detect_result as string) || 'machine';
             await deps.markPowerDialLegMachine({ legId, detectResult });
-
-            const ctx = campaignId ? await deps.loadCampaignForVoicemail(campaignId) : null;
-            if (ctx?.voicemailBehavior === 'leave_message' && ctx.voicemailMessage) {
-                await deps.callAuditTrack({
-                    type: 'power_dial.voicemail.leave_message',
-                    details: { campaignId, legId, detectResult },
-                    source: 'signalwire.power_dial_voicemail',
-                });
-                res.json(powerDialOverflowSwml({
-                    mode: 'leave_message',
-                    voicemailMessage: ctx.voicemailMessage,
-                }));
-                return;
-            }
-
             await deps.callAuditTrack({
-                type: 'power_dial.voicemail.hangup',
+                type: 'power_dial.voicemail.audit',
                 details: { campaignId, legId, detectResult },
                 source: 'signalwire.power_dial_voicemail',
             });
-            res.json(hangupSwml());
+            res.json({ ack: true });
         } catch (err) {
-            logger.error('swml.power-dial/voicemail error — returning hangup', { campaignId, legId, err });
-            res.json(hangupSwml());
+            logger.error('swml.power-dial/voicemail error', { campaignId, legId, err });
+            res.json({ ack: false });
         }
     });
 

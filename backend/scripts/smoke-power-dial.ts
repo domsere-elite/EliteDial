@@ -130,6 +130,10 @@ async function main() {
             legId,
             campaignId: campaign.id,
             callerId: fromDid,
+            targetRef,
+            retellSipAddress: campaign.retellSipAddress,
+            voicemailBehavior: campaign.voicemailBehavior === 'leave_message' ? 'leave_message' : 'hangup',
+            voicemailMessage: campaign.voicemailMessage,
         });
         const r = await signalwireService.originatePowerDialLeg({
             to,

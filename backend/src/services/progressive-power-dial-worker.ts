@@ -41,6 +41,11 @@ export interface PowerDialCampaign {
     status: string;
     dialRatio: number;
     maxConcurrentCalls: number;
+    // Baked into the customer-leg SWML at origination time so the SWML can
+    // route locally without HTTP callbacks (see powerDialDetectSwml architecture).
+    retellSipAddress: string | null;
+    voicemailBehavior: string;
+    voicemailMessage: string | null;
 }
 
 export interface PowerDialContact {
@@ -245,6 +250,10 @@ export function buildProgressivePowerDialWorker(
                     legId,
                     campaignId: campaign.id,
                     callerId: fromNumber,
+                    targetRef,
+                    retellSipAddress: campaign.retellSipAddress,
+                    voicemailBehavior: (campaign.voicemailBehavior === 'leave_message' ? 'leave_message' : 'hangup'),
+                    voicemailMessage: campaign.voicemailMessage,
                 });
 
                 const result = await originateLeg({
@@ -358,6 +367,9 @@ const defaultListActivePowerDialCampaigns = async (): Promise<PowerDialCampaign[
             status: true,
             dialRatio: true,
             maxConcurrentCalls: true,
+            retellSipAddress: true,
+            voicemailBehavior: true,
+            voicemailMessage: true,
         },
     });
 };

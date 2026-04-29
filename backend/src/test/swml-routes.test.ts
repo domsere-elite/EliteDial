@@ -214,7 +214,7 @@ function makePowerDialApp(deps: SwmlRouteDeps): express.Express {
     return a;
 }
 
-test('swml-routes: /power-dial/claim — winner returns bridge SWML to /private/<targetRef>', async () => {
+test('swml-routes: /power-dial/claim — winner returns { outcome: "bridge" }', async () => {
     const calls: any[] = [];
     const a = makePowerDialApp(mkDeps({
         claimPowerDialLeg: async ({ batchId, legId }) => {
@@ -228,16 +228,11 @@ test('swml-routes: /power-dial/claim — winner returns bridge SWML to /private/
         .send({});
 
     assert.equal(res.status, 200);
-    const connect = res.body.sections.main.find((s: any) => s.connect !== undefined);
-    assert.ok(connect, 'bridge connect step present');
-    assert.equal(connect.connect.to, '/private/dominic');
-    // No `from:` on connect — softphone outbound shape; live smoke proved
-    // adding it broke Fabric bridge resolution.
-    assert.equal(connect.connect.from, undefined);
+    assert.deepEqual(res.body, { outcome: 'bridge' });
     assert.deepEqual(calls, [{ batchId: 'batch-1', legId: 'leg-1' }]);
 });
 
-test('swml-routes: /power-dial/claim — race loser with retellSipAddress returns AI overflow SWML', async () => {
+test('swml-routes: /power-dial/claim — race loser with retellSipAddress returns { outcome: "overflow" }', async () => {
     let overflowMarked: any = null;
     const a = makePowerDialApp(mkDeps({
         claimPowerDialLeg: async () => ({ won: false, targetRef: null }),
@@ -251,13 +246,11 @@ test('swml-routes: /power-dial/claim — race loser with retellSipAddress return
         .send({});
 
     assert.equal(res.status, 200);
-    const connect = res.body.sections.main.find((s: any) => s.connect !== undefined);
-    assert.ok(connect, 'AI bridge connect step present');
-    assert.equal(connect.connect.to, 'sip:agent_x@retell.example');
+    assert.deepEqual(res.body, { outcome: 'overflow' });
     assert.deepEqual(overflowMarked, { legId: 'leg-2', overflowTarget: 'ai' });
 });
 
-test('swml-routes: /power-dial/claim — race loser without retellSipAddress returns hangup', async () => {
+test('swml-routes: /power-dial/claim — race loser without retellSipAddress returns { outcome: "hangup" }', async () => {
     let overflowMarked: any = null;
     const a = makePowerDialApp(mkDeps({
         claimPowerDialLeg: async () => ({ won: false, targetRef: null }),
@@ -270,24 +263,20 @@ test('swml-routes: /power-dial/claim — race loser without retellSipAddress ret
         .send({});
 
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.sections.main, [{ hangup: {} }]);
+    assert.deepEqual(res.body, { outcome: 'hangup' });
     assert.deepEqual(overflowMarked, { legId: 'leg-3', overflowTarget: 'hangup' });
 });
 
-test('swml-routes: /power-dial/claim — missing batchId/legId returns hangup', async () => {
+test('swml-routes: /power-dial/claim — missing batchId/legId returns { outcome: "hangup" }', async () => {
     const a = makePowerDialApp(mkDeps());
     const res = await request(a).post('/swml/power-dial/claim').send({});
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.sections.main, [{ hangup: {} }]);
+    assert.deepEqual(res.body, { outcome: 'hangup' });
 });
 
-test('swml-routes: /power-dial/voicemail — leave_message returns TTS-then-hangup SWML', async () => {
+test('swml-routes: /power-dial/voicemail — marks leg as machine and acks', async () => {
     let machineMarked: any = null;
     const a = makePowerDialApp(mkDeps({
-        loadCampaignForVoicemail: async (id) =>
-            id === 'c-1'
-                ? { voicemailBehavior: 'leave_message', voicemailMessage: 'Please call us back.' }
-                : null,
         markPowerDialLegMachine: async (params) => { machineMarked = params; },
     }));
 
@@ -296,43 +285,13 @@ test('swml-routes: /power-dial/voicemail — leave_message returns TTS-then-hang
         .send({ detect_result: 'machine' });
 
     assert.equal(res.status, 200);
-    const main = res.body.sections.main;
-    const play = main.find((s: any) => s.play !== undefined);
-    assert.ok(play, 'TTS play step present');
-    assert.match(play.play.url, /^say:Please call us back/);
-    assert.ok(main.some((s: any) => s.hangup !== undefined), 'hangup follows the message');
+    assert.deepEqual(res.body, { ack: true });
     assert.deepEqual(machineMarked, { legId: 'leg-9', detectResult: 'machine' });
 });
 
-test('swml-routes: /power-dial/voicemail — hangup behavior returns minimal hangup SWML', async () => {
-    const a = makePowerDialApp(mkDeps({
-        loadCampaignForVoicemail: async () => ({ voicemailBehavior: 'hangup', voicemailMessage: null }),
-    }));
-
-    const res = await request(a)
-        .post('/swml/power-dial/voicemail?campaignId=c-1&legId=leg-9')
-        .send({});
-
-    assert.equal(res.status, 200);
-    assert.deepEqual(res.body.sections.main, [{ hangup: {} }]);
-});
-
-test('swml-routes: /power-dial/voicemail — leave_message without message degrades to hangup', async () => {
-    const a = makePowerDialApp(mkDeps({
-        loadCampaignForVoicemail: async () => ({ voicemailBehavior: 'leave_message', voicemailMessage: null }),
-    }));
-
-    const res = await request(a)
-        .post('/swml/power-dial/voicemail?campaignId=c-1&legId=leg-9')
-        .send({});
-
-    assert.equal(res.status, 200);
-    assert.deepEqual(res.body.sections.main, [{ hangup: {} }]);
-});
-
-test('swml-routes: /power-dial/voicemail — missing legId returns hangup', async () => {
+test('swml-routes: /power-dial/voicemail — missing legId returns { ack: false }', async () => {
     const a = makePowerDialApp(mkDeps());
     const res = await request(a).post('/swml/power-dial/voicemail').send({});
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.sections.main, [{ hangup: {} }]);
+    assert.deepEqual(res.body, { ack: false });
 });

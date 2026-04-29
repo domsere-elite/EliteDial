@@ -127,6 +127,9 @@ const campRatio2: PowerDialCampaign = {
     status: 'active',
     dialRatio: 2.0,
     maxConcurrentCalls: 0,
+    retellSipAddress: null,
+    voicemailBehavior: 'hangup',
+    voicemailMessage: null,
 };
 const campRatio1: PowerDialCampaign = {
     id: 'camp-1x',
@@ -134,6 +137,9 @@ const campRatio1: PowerDialCampaign = {
     status: 'active',
     dialRatio: 1.0,
     maxConcurrentCalls: 0,
+    retellSipAddress: null,
+    voicemailBehavior: 'hangup',
+    voicemailMessage: null,
 };
 const campRatio3: PowerDialCampaign = {
     id: 'camp-3x',
@@ -141,6 +147,9 @@ const campRatio3: PowerDialCampaign = {
     status: 'active',
     dialRatio: 3.0,
     maxConcurrentCalls: 0,
+    retellSipAddress: null,
+    voicemailBehavior: 'hangup',
+    voicemailMessage: null,
 };
 
 function contact(id: string, phone: string): PowerDialReserveResult {
