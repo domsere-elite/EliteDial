@@ -201,6 +201,7 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
         dialRatio,
         voicemailBehavior,
         voicemailMessage,
+        skipAmd,
         retellAgentId,
         retellSipAddress,
     } = req.body;
@@ -217,6 +218,7 @@ router.post('/', authenticate, requireMinRole('supervisor'), validate(createCamp
             dialRatio: Math.max(1.0, Math.min(5.0, toNumber(dialRatio, 1.0))),
             voicemailBehavior: voicemailBehavior ?? 'hangup',
             voicemailMessage: voicemailMessage ?? null,
+            skipAmd: skipAmd ?? true,
             retellAgentId: retellAgentId ?? null,
             retellSipAddress: retellSipAddress ?? null,
             createdById: req.user?.id,
@@ -387,6 +389,7 @@ router.patch('/:id', authenticate, requireMinRole('supervisor'), validate(update
             dialRatio: validated.dialRatio === undefined ? undefined : Math.max(1.0, Math.min(5.0, toNumber(validated.dialRatio, 1.0))),
             voicemailBehavior: validated.voicemailBehavior,
             voicemailMessage: validated.voicemailMessage,
+            skipAmd: validated.skipAmd,
             retellAgentId: validated.retellAgentId,
             retellSipAddress: validated.retellSipAddress,
         },

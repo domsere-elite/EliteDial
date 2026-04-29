@@ -158,6 +158,10 @@ const baseDetectParams = {
     retellSipAddress: null as string | null,
     voicemailBehavior: 'hangup' as 'hangup' | 'leave_message',
     voicemailMessage: null as string | null,
+    // Default skipAmd=false in the existing test fixture so the AMD-path tests
+    // below keep verifying the AMD flow. New tests further down assert the
+    // skipAmd=true (production default) flow.
+    skipAmd: false,
 };
 
 test('swml-builder: powerDialDetectSwml main runs answer + detect_machine + cond', () => {
@@ -291,4 +295,42 @@ test('swml-builder: powerDialDetectSwml URL-encodes ids that contain unsafe char
     const humanReqUrl = cond.find((b: any) => b.then).then.find((s: any) => s.request).request.url;
     assert.match(humanReqUrl, /batchId=batch%20with%20space/);
     assert.match(humanReqUrl, /legId=leg%2F1/);
+});
+
+// ---- skipAmd=true (production default) — fast path with no AMD --------------
+
+test('swml-builder: powerDialDetectSwml(skipAmd=true) — main is answer + claim, no detect_machine, no cond', () => {
+    const doc = powerDialDetectSwml({ ...baseDetectParams, skipAmd: true });
+    const main = doc.sections.main;
+    assert.ok(main.some((s: any) => s.answer !== undefined), 'answer present');
+    assert.ok(!main.some((s: any) => s.detect_machine !== undefined), 'no detect_machine in fast path');
+    assert.ok(!main.some((s: any) => s.cond !== undefined), 'no cond branching in fast path');
+    const req = main.find((s: any) => s.request !== undefined);
+    assert.ok(req, 'request to claim present');
+    assert.equal(req.request.save_variables, true);
+    const sw = main.find((s: any) => s.switch !== undefined);
+    assert.ok(sw, 'switch on outcome present');
+    assert.equal(sw.switch.variable, 'request_response.outcome');
+});
+
+test('swml-builder: powerDialDetectSwml(skipAmd=true) — bridge, overflow_ai, hangup_now sections still exist', () => {
+    const doc = powerDialDetectSwml({ ...baseDetectParams, skipAmd: true });
+    assert.ok(doc.sections.bridge, 'bridge section still defined for outcome=bridge');
+    assert.ok(doc.sections.overflow_ai, 'overflow_ai still defined');
+    assert.ok(doc.sections.hangup_now, 'hangup_now still defined');
+});
+
+test('swml-builder: powerDialDetectSwml(skipAmd=true) — claim URL still embeds all routing params', () => {
+    const doc = powerDialDetectSwml({
+        ...baseDetectParams,
+        skipAmd: true,
+        batchId: 'b-7',
+        legId: 'l-9',
+        campaignId: 'c-3',
+    });
+    const req = doc.sections.main.find((s: any) => s.request !== undefined)!;
+    assert.match(req.request.url, /batchId=b-7/);
+    assert.match(req.request.url, /legId=l-9/);
+    assert.match(req.request.url, /campaignId=c-3/);
+    assert.match(req.request.url, /callerId=%2B13467760336/);
 });

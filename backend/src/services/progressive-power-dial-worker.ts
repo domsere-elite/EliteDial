@@ -46,6 +46,7 @@ export interface PowerDialCampaign {
     retellSipAddress: string | null;
     voicemailBehavior: string;
     voicemailMessage: string | null;
+    skipAmd: boolean;
 }
 
 export interface PowerDialContact {
@@ -254,6 +255,7 @@ export function buildProgressivePowerDialWorker(
                     retellSipAddress: campaign.retellSipAddress,
                     voicemailBehavior: (campaign.voicemailBehavior === 'leave_message' ? 'leave_message' : 'hangup'),
                     voicemailMessage: campaign.voicemailMessage,
+                    skipAmd: campaign.skipAmd,
                 });
 
                 const result = await originateLeg({
@@ -370,6 +372,7 @@ const defaultListActivePowerDialCampaigns = async (): Promise<PowerDialCampaign[
             retellSipAddress: true,
             voicemailBehavior: true,
             voicemailMessage: true,
+            skipAmd: true,
         },
     });
 };

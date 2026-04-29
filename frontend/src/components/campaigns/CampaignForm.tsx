@@ -17,6 +17,7 @@ export interface CampaignFormValues {
     dialRatio: number;
     voicemailBehavior: VoicemailBehavior;
     voicemailMessage: string;
+    skipAmd: boolean;
     retellAgentId: string | null;
     retellSipAddress: string | null;
 }
@@ -32,6 +33,7 @@ const DEFAULT_VALUES: CampaignFormValues = {
     dialRatio: 1.0,
     voicemailBehavior: 'hangup',
     voicemailMessage: '',
+    skipAmd: true,
     retellAgentId: null,
     retellSipAddress: null,
 };
@@ -190,8 +192,33 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                 </div>
             )}
 
-            {/* VOICEMAIL HANDLING — progressive only (ai_autonomous lets the AI handle VM) */}
+            {/* ANSWERING MACHINE DETECTION — progressive only */}
             {values.dialMode === 'progressive' && (
+                <div className="card">
+                    <div className="section-label" style={{ marginBottom: 10 }}>Answering Machine Detection</div>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        <input
+                            type="checkbox"
+                            id="skipAmd"
+                            checked={values.skipAmd}
+                            onChange={e => set('skipAmd', e.target.checked)}
+                            style={{ marginTop: 4 }}
+                        />
+                        <label htmlFor="skipAmd" style={{ flex: 1, cursor: 'pointer' }}>
+                            <strong>Skip AMD (recommended for production collections)</strong>
+                            <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>
+                                When enabled (default), agents are bridged to customers within ~1-2 seconds of answer.
+                                Agents handle voicemails manually — industry standard for power-dialers.
+                                Uncheck to filter voicemails server-side at the cost of 4-7 seconds of post-answer
+                                silence per call.
+                            </div>
+                        </label>
+                    </div>
+                </div>
+            )}
+
+            {/* VOICEMAIL HANDLING — only meaningful when AMD is on (skipAmd=false) */}
+            {values.dialMode === 'progressive' && !values.skipAmd && (
                 <div className="card">
                     <div className="section-label" style={{ marginBottom: 10 }}>Voicemail Handling</div>
                     <div>
@@ -205,7 +232,7 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                             <option value="leave_message">Leave a voicemail message</option>
                         </select>
                         <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 3 }}>
-                            Applied to power-dial legs that reach voicemail. AI Autonomous campaigns let the Retell agent handle voicemail directly.
+                            Applied to power-dial legs that AMD classifies as a machine.
                         </div>
                     </div>
                     {values.voicemailBehavior === 'leave_message' && (

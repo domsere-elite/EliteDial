@@ -34,6 +34,7 @@ export default function EditCampaignPage() {
                 dialRatio: typeof c.dialRatio === 'number' ? c.dialRatio : 1.0,
                 voicemailBehavior: c.voicemailBehavior ?? 'hangup',
                 voicemailMessage: c.voicemailMessage ?? '',
+                skipAmd: typeof c.skipAmd === 'boolean' ? c.skipAmd : true,
                 retellAgentId: c.retellAgentId ?? null,
                 retellSipAddress: c.retellSipAddress ?? null,
             });

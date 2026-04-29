@@ -287,6 +287,13 @@ model Campaign {
   // hangup = drop the call. leave_message = play voicemailMessage as TTS, then hang up.
   voicemailBehavior  String            @default("hangup") // hangup | leave_message
   voicemailMessage   String?           // TTS text used when voicemailBehavior = leave_message
+  // Skip answering-machine detection on power-dial legs. Default true because
+  // AMD adds 4-7s of silence post-answer which is unacceptable in production
+  // collections. With skipAmd, the customer leg goes straight from answer to
+  // claim → bridge. Trade: agents handle voicemails manually (industry default
+  // for collections power-dialers). voicemailBehavior + voicemailMessage are
+  // only honoured when skipAmd=false.
+  skipAmd            Boolean           @default(true)
   proximityMatchEnabled  Boolean           @default(true)
   autoRotateEnabled      Boolean           @default(true)
   maxCallsPerDIDPerDay   Int               @default(50)

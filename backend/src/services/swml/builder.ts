@@ -327,6 +327,12 @@ export interface PowerDialDetectParams {
     retellSipAddress?: string | null; // campaign's AI overflow target, if configured
     voicemailBehavior: 'hangup' | 'leave_message';
     voicemailMessage?: string | null;
+    // When true (production default), the customer-leg SWML skips AMD and goes
+    // straight from answer → claim → bridge. Saves 4-7s of post-answer silence
+    // at the cost of agents handling voicemails manually. When false, the
+    // existing AMD-driven path runs (cond on detect_result, voicemail branch
+    // honours voicemailBehavior).
+    skipAmd: boolean;
 }
 
 export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
@@ -375,7 +381,7 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
     // After the claim request, branch on the JSON outcome the route returned.
     // The route returns one of: bridge | overflow | hangup. Anything else
     // (network error, response missing) falls into the default → hangup_now.
-    const claimBranch: SwmlStep[] = [
+    const claimSteps: SwmlStep[] = [
         {
             request: {
                 url: claimUrl,
@@ -412,25 +418,32 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
             { hangup: {} },
         ];
 
+    // Two main flows:
+    //
+    // skipAmd=true (production default): answer + claim + branch. No AMD, no
+    //   voicemail branch on the customer leg. Total post-answer time before
+    //   bridge attempt: ~150ms (the claim HTTP roundtrip). Agents handle VMs.
+    //
+    // skipAmd=false (compliance-sensitive opt-in): answer + detect_machine
+    //   (4-7s) + cond on detect_result. Human → claim. Machine → voicemail
+    //   branch (audit + optional TTS).
+    const mainSteps: SwmlStep[] = p.skipAmd
+        ? [{ answer: {} }, ...claimSteps]
+        : [
+            { answer: {} },
+            { detect_machine: { detectors: 'amd', wait: true, timeout: 10 } },
+            {
+                cond: [
+                    { when: "detect_result == 'human'", then: claimSteps },
+                    { else: voicemailBranch },
+                ],
+            },
+        ];
+
     return {
         version: '1.0.0',
         sections: {
-            main: [
-                { answer: {} },
-                {
-                    detect_machine: {
-                        detectors: 'amd',
-                        wait: true,
-                        timeout: 10,
-                    },
-                },
-                {
-                    cond: [
-                        { when: "detect_result == 'human'", then: claimBranch },
-                        { else: voicemailBranch },
-                    ],
-                },
-            ],
+            main: mainSteps,
             bridge: bridgeSection,
             overflow_ai: overflowAiSection,
             hangup_now: hangupNowSection,

@@ -115,6 +115,9 @@ export const createCampaignSchema = z.object({
     dialRatio: dialRatioField.optional().default(1.0),
     voicemailBehavior: voicemailBehaviorField.optional().default('hangup'),
     voicemailMessage: optionalString,
+    // skipAmd default true: prefer speed for collections. AMD becomes opt-in
+    // for compliance-sensitive lists.
+    skipAmd: z.boolean().optional().default(true),
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
 }).refine(
@@ -133,6 +136,7 @@ export const updateCampaignSchema = z.object({
     dialRatio: dialRatioField.optional(),
     voicemailBehavior: voicemailBehaviorField.optional(),
     voicemailMessage: z.string().nullable().optional(),
+    skipAmd: z.boolean().optional(),
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
 });
