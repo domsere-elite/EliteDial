@@ -1,3 +1,5 @@
+import { logger } from '../utils/logger';
+
 export interface SchedulerDeps {
     exitWrapUp: (agentId: string) => Promise<{ transitioned: boolean }>;
 }
@@ -5,7 +7,6 @@ export interface SchedulerDeps {
 export interface WrapUpScheduler {
     schedule(agentId: string, seconds: number): void;
     cancel(agentId: string): void;
-    cancelAll(): void;
 }
 
 export function buildWrapUpScheduler(deps: SchedulerDeps): WrapUpScheduler {
@@ -16,7 +17,11 @@ export function buildWrapUpScheduler(deps: SchedulerDeps): WrapUpScheduler {
             if (existing) clearTimeout(existing);
             const t = setTimeout(() => {
                 timers.delete(agentId);
-                deps.exitWrapUp(agentId).catch(() => { /* swept by tick fallback */ });
+                deps.exitWrapUp(agentId).catch((err) => {
+                    // Worker tick + boot sweep is the recovery path; log for
+                    // observability so transient failures aren't fully silent.
+                    logger.debug('timer-based exitWrapUp failed, will be swept', { agentId, err });
+                });
             }, seconds * 1000);
             timers.set(agentId, t);
         },
@@ -26,10 +31,6 @@ export function buildWrapUpScheduler(deps: SchedulerDeps): WrapUpScheduler {
                 clearTimeout(t);
                 timers.delete(agentId);
             }
-        },
-        cancelAll() {
-            for (const t of timers.values()) clearTimeout(t);
-            timers.clear();
         },
     };
 }

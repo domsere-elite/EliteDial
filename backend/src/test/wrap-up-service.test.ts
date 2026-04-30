@@ -18,16 +18,6 @@ function makeFakes() {
             profiles.set(id, updated);
             return updated;
         },
-        prismaProfileUpdateMany: async (where: { status: string }, data: Partial<FakeProfile>) => {
-            let count = 0;
-            for (const [id, p] of profiles.entries()) {
-                if (p.status === where.status) {
-                    profiles.set(id, { ...p, ...data });
-                    count++;
-                }
-            }
-            return { count };
-        },
         prismaFindExpiredWrapUps: async (asOf: Date) => {
             return [...profiles.values()].filter(
                 (p) => p.status === 'wrap-up' && p.wrapUpUntil !== null && p.wrapUpUntil <= asOf,

@@ -4,7 +4,6 @@ import { emitToUser } from '../lib/socket';
 export interface WrapUpDeps {
     prismaProfileFindUnique: (id: string) => Promise<{ id: string; status: string; wrapUpUntil: Date | null } | null>;
     prismaProfileUpdate: (id: string, data: { status?: string; wrapUpUntil?: Date | null }) => Promise<{ id: string; status: string; wrapUpUntil: Date | null }>;
-    prismaProfileUpdateMany: (where: { status: string }, data: { status: string; wrapUpUntil: Date | null }) => Promise<{ count: number }>;
     prismaFindExpiredWrapUps: (asOf: Date) => Promise<Array<{ id: string }>>;
     emitToUser: (userId: string, event: string, data: unknown) => void;
     now: () => Date;
@@ -69,8 +68,6 @@ export const wrapUpService: WrapUpService = buildWrapUpService({
             data,
             select: { id: true, status: true, wrapUpUntil: true },
         }),
-    prismaProfileUpdateMany: async (where, data) =>
-        prisma.profile.updateMany({ where, data }),
     prismaFindExpiredWrapUps: async (asOf) =>
         prisma.profile.findMany({
             where: { status: 'wrap-up', wrapUpUntil: { lte: asOf } },
