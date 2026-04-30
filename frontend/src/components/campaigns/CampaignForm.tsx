@@ -18,6 +18,7 @@ export interface CampaignFormValues {
     voicemailBehavior: VoicemailBehavior;
     voicemailMessage: string;
     skipAmd: boolean;
+    wrapUpSeconds: number;
     retellAgentId: string | null;
     retellSipAddress: string | null;
 }
@@ -34,6 +35,7 @@ const DEFAULT_VALUES: CampaignFormValues = {
     voicemailBehavior: 'hangup',
     voicemailMessage: '',
     skipAmd: true,
+    wrapUpSeconds: 30,
     retellAgentId: null,
     retellSipAddress: null,
 };
@@ -216,6 +218,28 @@ export function CampaignForm({ initialValues, mode, submitting, error, onSubmit,
                     </div>
                 </div>
             )}
+
+            {/* POST-CALL WRAP-UP WINDOW */}
+            <div className="card">
+                <div className="section-label" style={{ marginBottom: 10 }}>Post-Call Wrap-Up</div>
+                <label htmlFor="wrapUpSeconds" style={{ display: 'block', marginBottom: 6 }}>
+                    Wrap-up window (seconds)
+                </label>
+                <input
+                    id="wrapUpSeconds"
+                    type="number"
+                    min={0}
+                    max={300}
+                    value={values.wrapUpSeconds}
+                    onChange={e => set('wrapUpSeconds', parseInt(e.target.value, 10) || 0)}
+                    style={{ width: 120 }}
+                />
+                <div style={{ fontSize: '0.714rem', color: 'var(--text-muted)', marginTop: 6 }}>
+                    How long agents stay in wrap-up after a call ends before the worker is allowed to dispatch the next call.
+                    Agents can submit a disposition or click <em>Ready Now</em> to skip; otherwise the timer auto-resumes them. Default 30s.
+                </div>
+                {fieldErrors.wrapUpSeconds && <div style={{ color: 'var(--status-red-text)', fontSize: '0.786rem', marginTop: 4 }}>{fieldErrors.wrapUpSeconds}</div>}
+            </div>
 
             {/* VOICEMAIL HANDLING — only meaningful when AMD is on (skipAmd=false) */}
             {values.dialMode === 'progressive' && !values.skipAmd && (

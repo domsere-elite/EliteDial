@@ -17,6 +17,7 @@ interface Campaign {
     dialRatio?: number;
     voicemailBehavior?: string;
     voicemailMessage?: string | null;
+    wrapUpSeconds?: number;
     retellAgentId?: string | null;
 }
 
@@ -120,6 +121,7 @@ export function SettingsTab({ campaign }: Props) {
                 <div className="section-label" style={{ marginBottom: 10 }}>Retry Strategy</div>
                 <Row label="Max Attempts Per Lead" value={campaign.maxAttemptsPerLead} />
                 <Row label="Retry Delay" value={formatRetry(campaign.retryDelaySeconds)} />
+                <Row label="Wrap-up window" value={`${campaign.wrapUpSeconds ?? 30}s`} />
             </div>
         </div>
     );

@@ -35,6 +35,7 @@ export default function EditCampaignPage() {
                 voicemailBehavior: c.voicemailBehavior ?? 'hangup',
                 voicemailMessage: c.voicemailMessage ?? '',
                 skipAmd: typeof c.skipAmd === 'boolean' ? c.skipAmd : true,
+                wrapUpSeconds: typeof c.wrapUpSeconds === 'number' ? c.wrapUpSeconds : 30,
                 retellAgentId: c.retellAgentId ?? null,
                 retellSipAddress: c.retellSipAddress ?? null,
             });
