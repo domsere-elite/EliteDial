@@ -11,15 +11,16 @@ datasource db {
 
 model Profile {
   // PK is auth.users.id (Supabase generates the UUID; DB-level FK enforces it).
-  id           String   @id @db.Uuid
-  email        String   @unique
+  id           String    @id @db.Uuid
+  email        String    @unique
   firstName    String
   lastName     String
-  role         String   @default("agent") // agent | supervisor | admin
-  status       String   @default("offline") // available | break | offline | on-call
+  role         String    @default("agent") // agent | supervisor | admin
+  status       String    @default("offline") // available | break | offline | on-call | wrap-up
   extension    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  wrapUpUntil  DateTime? // deadline for current wrap-up window; null when status != 'wrap-up'
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   calls        Call[]
   callSessions CallSession[]
@@ -294,6 +295,11 @@ model Campaign {
   // for collections power-dialers). voicemailBehavior + voicemailMessage are
   // only honoured when skipAmd=false.
   skipAmd            Boolean           @default(true)
+  // Seconds to hold the agent in wrap-up state after a call ends. Agent can
+  // submit disposition + click Ready Now to skip; otherwise auto-resumes
+  // to 'available' when the window expires. Defaults match collections
+  // industry norms (~30s breath between dials).
+  wrapUpSeconds      Int               @default(30)
   proximityMatchEnabled  Boolean           @default(true)
   autoRotateEnabled      Boolean           @default(true)
   maxCallsPerDIDPerDay   Int               @default(50)
