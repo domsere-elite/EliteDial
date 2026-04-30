@@ -151,10 +151,16 @@ test('originateAgentBrowserCall posts dial to=PSTN with inline SWML connecting t
         assert.equal(body.params.from, '+13467760336', 'from is the DID');
         assert.equal(body.params.to, '+18327979834', 'to is the customer PSTN number — dialed first');
         assert.equal(body.params.caller_id, '+13467760336');
-        assert.ok(typeof body.params.swml === 'string', 'inline SWML provided');
-        assert.match(body.params.swml, /answer:/);
-        assert.match(body.params.swml, /\/private\/agent-uuid-1/, 'connects to agent Fabric address after customer answers');
+        // SWML is the top-level inline-object form (sibling of params), required
+        // for SignalWire to honour status_url/status_events callbacks.
+        assert.equal(typeof body.swml, 'object', 'inline SWML object provided');
+        assert.equal(body.swml.version, '1.0.0');
+        const main = body.swml.sections.main;
+        assert.ok(Array.isArray(main));
+        assert.deepEqual(main[0], { answer: {} });
+        assert.equal(main[1].connect.to, '/private/agent-uuid-1', 'connects to agent Fabric address after customer answers');
         assert.match(body.params.status_url, /\/signalwire\/events\/call-status/);
+        assert.deepEqual(body.params.status_events, ['answered', 'ended']);
         return makeResponse(200, { id: 'sw-call-42' });
     });
 

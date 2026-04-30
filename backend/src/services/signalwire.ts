@@ -249,17 +249,18 @@ export class SignalWireService implements TelephonyProvider {
             // fabric event" warning), media negotiation never completes, and
             // SignalWire tears the call down ~4s after answer with end_reason: hangup.
             const fabricTarget = `/private/${params.agentSipReference}`;
-            const inlineSwml = [
-                'version: 1.0.0',
-                'sections:',
-                '  main:',
-                '    - answer: {}',
-                '    - connect:',
-                `        to: ${fabricTarget}`,
-                '        timeout: 30',
-                '        answer_on_bridge: true',
-                '    - hangup: {}',
-            ].join('\n');
+            // Inline-object SWML — must be top-level sibling of params for
+            // SignalWire to honour status_url callbacks.
+            const inlineSwml = {
+                version: '1.0.0',
+                sections: {
+                    main: [
+                        { answer: {} },
+                        { connect: { to: fabricTarget, timeout: 30, answer_on_bridge: true } },
+                        { hangup: {} },
+                    ],
+                },
+            };
 
             const response = await this.fetchImpl(`${this.baseUrl}/api/calling/calls`, {
                 method: 'POST',
@@ -270,14 +271,10 @@ export class SignalWireService implements TelephonyProvider {
                         from: params.callerIdNumber,
                         to: params.toNumber,
                         caller_id: params.callerIdNumber,
-                        swml: inlineSwml,
                         status_url: statusUrl,
-                        // SignalWire only fires status_url callbacks for the events
-                        // listed here. Without status_events the status_url is silently
-                        // ignored — power-dial wrap-up + auto-resume require the
-                        // 'ended' event to flip Profile.status off on-call.
                         status_events: ['answered', 'ended'],
                     },
+                    swml: inlineSwml,
                 }),
             });
 
@@ -324,15 +321,15 @@ export class SignalWireService implements TelephonyProvider {
                         from: params.from,
                         to: params.to,
                         caller_id: params.from,
-                        // SignalWire accepts the SWML document as a JSON-serialized
-                        // string here (parallel to YAML strings used elsewhere).
-                        swml: JSON.stringify(params.swml),
                         status_url: params.statusUrl,
-                        // status_url is silently no-op'd unless status_events lists
-                        // which events to fire. We need 'ended' for the wrap-up
-                        // state machine to engage at call completion.
+                        // status_url + status_events are required together. Empirically
+                        // the inline-escaped-string SWML placement (swml inside params
+                        // as a string) silently drops these callbacks; the inline-object
+                        // form below (swml as a top-level sibling of params) does fire.
                         status_events: ['answered', 'ended'],
                     },
+                    // Inline-object SWML — sibling of params per SignalWire REST docs.
+                    swml: params.swml,
                 }),
             });
 
