@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AccountPreview } from '@/hooks/useCallState';
 import { AccountCard } from '../account/AccountCard';
 
@@ -21,13 +21,27 @@ interface WrapUpViewProps {
   onFdcpaChange: (confirmed: boolean) => void;
   onSubmit: (dispositionId: string, note: string, callbackDate?: string) => void;
   submitError: string;
+  wrapUpUntil: Date | null;
+  onReadyNow: () => void;
 }
 
 const SKIP_FDCPA_CODES = ['NA', 'VM', 'BUSY', 'DROP', 'FAILED', 'WN', 'DISC', 'DNC', 'LM', 'BK'];
 
-export function WrapUpView({ accountPreview, callerNumber, callerName, dispositions, notes, onNotesChange, fdcpaConfirmed, onFdcpaChange, onSubmit, submitError }: WrapUpViewProps) {
+export function WrapUpView({ accountPreview, callerNumber, callerName, dispositions, notes, onNotesChange, fdcpaConfirmed, onFdcpaChange, onSubmit, submitError, wrapUpUntil, onReadyNow }: WrapUpViewProps) {
   const [selectedId, setSelectedId] = useState('');
   const [callbackDate, setCallbackDate] = useState('');
+  const [secondsLeft, setSecondsLeft] = useState<number>(0);
+
+  useEffect(() => {
+    if (!wrapUpUntil) { setSecondsLeft(0); return; }
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((wrapUpUntil.getTime() - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+    };
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [wrapUpUntil]);
 
   const selectedCode = dispositions.find(d => d.id === selectedId)?.code || '';
   const showCallback = selectedCode.includes('CB');
@@ -45,6 +59,14 @@ export function WrapUpView({ accountPreview, callerNumber, callerName, dispositi
       </div>
       <div className="workspace-main">
         <div className="card" style={{ flex: 1 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span className="status-badge status-badge--info">
+              Wrap-up — {secondsLeft}s remaining
+            </span>
+            <button className="btn btn-secondary" onClick={onReadyNow}>
+              Ready Now
+            </button>
+          </div>
           <div className="section-label" style={{ marginBottom: 12, color: 'var(--status-amber-text)' }}>Select Disposition</div>
           <div className="disposition-grid" style={{ marginBottom: 14 }}>
             {dispositions.map((d) => (

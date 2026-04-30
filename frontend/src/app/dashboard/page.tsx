@@ -4,6 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCallTimer } from '@/hooks/useCallTimer';
 import { useSignalWire } from '@/hooks/useSignalWire';
 import { useRealtime } from '@/components/RealtimeProvider';
+import { useProfileStatus } from '@/hooks/useProfileStatus';
 import api from '@/lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -35,11 +36,10 @@ interface Disposition {
     label: string;
 }
 
-interface WrapUp {
+interface LastCallContext {
     callId: string;
     fromNumber: string;
     toNumber: string;
-    accountName?: string;
     duration: number;
     direction: 'inbound' | 'outbound';
 }
@@ -79,6 +79,7 @@ export default function DashboardPage() {
     const timer = useCallTimer();
     const sw = useSignalWire();
     const { on, off, connected: socketConnected } = useRealtime();
+    const profile = useProfileStatus();
 
     const [recentCalls, setRecentCalls] = useState<CallRecord[]>([]);
     const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
@@ -90,12 +91,15 @@ export default function DashboardPage() {
     const [dialPadOpen, setDialPadOpen] = useState(false);
     const [dialNumber, setDialNumber] = useState('');
     const [dialing, setDialing] = useState(false);
-    const [wrapUp, setWrapUp] = useState<WrapUp | null>(null);
     const [transferTarget, setTransferTarget] = useState('');
     const [transferring, setTransferring] = useState(false);
+    const [secondsLeft, setSecondsLeft] = useState(0);
 
     const wasOnCallRef = useRef(false);
     const activeOutboundContextRef = useRef<{ toNumber: string; fromNumber: string } | null>(null);
+    // Persists across the call-end → wrap-up transition so the disposition handler
+    // can POST to /api/calls/<id>/disposition after sw.callId has been cleared.
+    const lastCallContextRef = useRef<LastCallContext | null>(null);
 
     /* ── Connect SDK on mount ─────────────────────────────────────── */
     useEffect(() => {
@@ -146,14 +150,12 @@ export default function DashboardPage() {
         return () => off('call:status', handler);
     }, [on, off, fetchRecentCalls]);
 
-    /* ── Detect call-end → enter wrap-up ───────────────────────────── */
+    /* ── Detect call-end → capture context for disposition handler ──── */
+    // The wrap-up phase itself is now driven server-side via useProfileStatus;
+    // this effect just runs the timer and records the just-ended call so the
+    // disposition POST can find its callId after sw.callId has been cleared.
     useEffect(() => {
         if (sw.onCall) {
-            // Only start the timer on the transition INTO an active call.
-            // The timer object reference changes every tick (because seconds
-            // updates trigger a parent re-render), which re-fires this effect
-            // — without the wasOnCallRef guard, timer.start() would reset
-            // to 0 every second and the duration display stays at 00:00:00.
             if (!wasOnCallRef.current) {
                 wasOnCallRef.current = true;
                 timer.start();
@@ -161,24 +163,35 @@ export default function DashboardPage() {
             return;
         }
         if (wasOnCallRef.current && !sw.onCall && !sw.ringing && !sw.incomingCall) {
-            // Just transitioned out of an active call
             const dur = timer.stop();
             const callId = sw.callId;
             const ctx = activeOutboundContextRef.current;
             if (callId) {
-                setWrapUp({
+                lastCallContextRef.current = {
                     callId,
                     fromNumber: ctx?.fromNumber || '',
                     toNumber: ctx?.toNumber || sw.currentNumber,
                     duration: dur,
                     direction: ctx ? 'outbound' : 'inbound',
-                });
+                };
             }
             wasOnCallRef.current = false;
             activeOutboundContextRef.current = null;
             void fetchRecentCalls();
         }
     }, [sw.onCall, sw.ringing, sw.incomingCall, sw.callId, sw.currentNumber, timer, fetchRecentCalls]);
+
+    /* ── Wrap-up countdown (drives the visible timer in the disposition panel) */
+    useEffect(() => {
+        if (!profile.wrapUpUntil) { setSecondsLeft(0); return; }
+        const tick = () => {
+            const remaining = Math.max(0, Math.ceil((profile.wrapUpUntil!.getTime() - Date.now()) / 1000));
+            setSecondsLeft(remaining);
+        };
+        tick();
+        const id = setInterval(tick, 250);
+        return () => clearInterval(id);
+    }, [profile.wrapUpUntil]);
 
     /* ── CRM lookup follows live call or selection ─────────────────── */
     useEffect(() => {
@@ -198,23 +211,32 @@ export default function DashboardPage() {
     const handleHangup = async () => { await sw.hangup(); };
 
     const handleDispositionSubmit = async () => {
-        if (!wrapUp || !selectedDispositionId) return;
+        const ctx = lastCallContextRef.current;
+        if (!ctx || !selectedDispositionId) return;
         try {
-            await api.post(`/calls/${wrapUp.callId}/disposition`, {
+            await api.post(`/calls/${ctx.callId}/disposition`, {
                 dispositionId: selectedDispositionId,
                 notes: dispositionNote,
             });
-        } catch { /* user already saw the call go through; do not block UI on disposition save */ }
-        setWrapUp(null);
+        } catch { /* compliance: log; non-blocking */ }
+        try {
+            if (user?.id) await api.post(`/agents/${user.id}/ready`);
+        } catch { /* sweep + scheduler timer will catch us */ }
         setSelectedDispositionId('');
         setDispositionNote('');
         setTransferTarget('');
         void fetchRecentCalls();
     };
 
+    const handleReadyNow = async () => {
+        try {
+            if (user?.id) await api.post(`/agents/${user.id}/ready`);
+        } catch { /* sweep will catch us */ }
+    };
+
     const handleOutboundDial = async () => {
         const target = dialNumber.trim();
-        if (!target || dialing || wrapUp || sw.onCall || sw.ringing) return;
+        if (!target || dialing || profile.status === 'wrap-up' || sw.onCall || sw.ringing) return;
         setDialing(true);
         try {
             const result = await sw.dial(target);
@@ -250,7 +272,7 @@ export default function DashboardPage() {
     /* ── Derived UI state ─────────────────────────────────────────── */
 
     const phase: 'idle' | 'incoming' | 'outbound-ring' | 'connected' | 'wrap-up' =
-        wrapUp ? 'wrap-up'
+        profile.status === 'wrap-up' ? 'wrap-up'
             : sw.incomingCall ? 'incoming'
             : sw.onCall ? 'connected'
             : sw.ringing ? 'outbound-ring'
@@ -432,14 +454,14 @@ export default function DashboardPage() {
                             </>
                         )}
 
-                        {phase === 'wrap-up' && wrapUp && (
+                        {phase === 'wrap-up' && lastCallContextRef.current && (
                             <>
                                 <span className="status-badge status-badge--info">wrap-up</span>
                                 <p className="mono" style={{ fontSize: '1.4rem', letterSpacing: '-0.03em' }}>
-                                    {wrapUp.direction === 'outbound' ? wrapUp.toNumber : wrapUp.fromNumber}
+                                    {lastCallContextRef.current.direction === 'outbound' ? lastCallContextRef.current.toNumber : lastCallContextRef.current.fromNumber}
                                 </p>
                                 <p style={{ color: 'var(--text-muted)' }}>
-                                    Call ended after {fmtDuration(wrapUp.duration)}. Submit disposition to take the next call.
+                                    Call ended after {fmtDuration(lastCallContextRef.current.duration)}. Submit disposition or click Ready Now.
                                 </p>
                             </>
                         )}
@@ -576,8 +598,19 @@ export default function DashboardPage() {
                     {/* Disposition Form -- only during wrap-up */}
                     {phase === 'wrap-up' && (
                         <div className="glass-panel workspace-panel">
-                            <div className="panel-heading">
+                            <div className="panel-heading" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <h3>Disposition</h3>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span className="status-badge">
+                                        Wrap-up — {secondsLeft}s
+                                    </span>
+                                    <button
+                                        className="btn btn-secondary"
+                                        onClick={handleReadyNow}
+                                    >
+                                        Ready Now
+                                    </button>
+                                </div>
                             </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                                 <select
@@ -602,7 +635,7 @@ export default function DashboardPage() {
                                     disabled={!selectedDispositionId}
                                     onClick={handleDispositionSubmit}
                                 >
-                                    Submit Disposition
+                                    Submit &amp; Next
                                 </button>
                             </div>
                         </div>
