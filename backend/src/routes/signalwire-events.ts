@@ -111,11 +111,52 @@ async function defaultFindCallWithAttempt(callId: string) {
     });
 }
 
-async function defaultFindCompletedCall(callId: string) {
-    return prisma.call.findFirst({
-        where: { signalwireCallId: callId },
-        select: { agentId: true, id: true, accountId: true },
-    });
+// Resolve the agent + (optionally) call/account context for a terminal
+// call-status webhook. Calls live in two tables:
+//   1. Call — created by manual softphone outbound, inbound, AI-autonomous
+//   2. PowerDialLeg — created by the progressive power-dial worker; no
+//      Call row is ever written. The agent owning the leg is derived via
+//      the parent PowerDialBatch.agentId.
+// We must check both, otherwise power-dial answers leave the agent stuck
+// in `on-call` state because enterWrapUp is never invoked.
+export interface CompletedCallContext {
+    id: string | null;
+    agentId: string | null;
+    accountId: string | null;
+}
+
+export interface CompletedCallLookupDeps {
+    findCallByProviderId: (providerCallId: string) => Promise<{ id: string; agentId: string | null; accountId: string | null } | null>;
+    findPowerDialLegByProviderId: (providerCallId: string) => Promise<{ id: string; batch: { agentId: string } } | null>;
+}
+
+export async function resolveCompletedCallContext(
+    deps: CompletedCallLookupDeps,
+    providerCallId: string,
+): Promise<CompletedCallContext | null> {
+    const call = await deps.findCallByProviderId(providerCallId);
+    if (call) return { id: call.id, agentId: call.agentId, accountId: call.accountId };
+    const leg = await deps.findPowerDialLegByProviderId(providerCallId);
+    if (leg) return { id: leg.id, agentId: leg.batch.agentId, accountId: null };
+    return null;
+}
+
+async function defaultFindCompletedCall(callId: string): Promise<CompletedCallContext | null> {
+    return resolveCompletedCallContext(
+        {
+            findCallByProviderId: (id) =>
+                prisma.call.findFirst({
+                    where: { signalwireCallId: id },
+                    select: { id: true, agentId: true, accountId: true },
+                }),
+            findPowerDialLegByProviderId: (id) =>
+                prisma.powerDialLeg.findFirst({
+                    where: { providerCallId: id },
+                    select: { id: true, batch: { select: { agentId: true } } },
+                }),
+        },
+        callId,
+    );
 }
 
 async function defaultEnterWrapUp(agentId: string, wrapUpSeconds: number) {
