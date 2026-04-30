@@ -335,3 +335,43 @@ test('power-dial-worker: tick is serialised — concurrent ticks share the same 
     await Promise.all([w.tick(), w.tick(), w.tick()]);
     assert.equal(listAgentsCalls, 1, 'overlapping ticks reuse one inFlight promise');
 });
+
+// Phase 3b regression — wrap-up agents must be excluded from dispatch.
+//
+// Production listAvailableAgents filters `where: { status: 'available' }`,
+// which by construction excludes 'wrap-up'. This test simulates that filter
+// against a fake population and feeds the resulting list to the worker; the
+// expectation is that no leg originates to a wrap-up agent.
+test('power-dial-worker: wrap-up agents are excluded from the dispatch pool', async () => {
+    type AgentRow = { id: string; email: string; status: string };
+    const allProfiles: AgentRow[] = [
+        { id: 'agent-uuid-a', email: 'available@x', status: 'available' },
+        { id: 'agent-uuid-w', email: 'wrapup@x', status: 'wrap-up' },
+        { id: 'agent-uuid-c', email: 'oncall@x', status: 'on-call' },
+        { id: 'agent-uuid-b', email: 'break@x', status: 'break' },
+    ];
+
+    // Mirror the production listAvailableAgents query: status === 'available'.
+    const listAvailableAgents = async (): Promise<PowerDialAgent[]> =>
+        allProfiles
+            .filter((p) => p.status === 'available')
+            .map(({ id, email }) => ({ id, email }));
+
+    const { deps, rec } = makeDeps({
+        campaigns: [campRatio2],
+        contactQueue: [[contact('c1', '+15551110001'), contact('c2', '+15551110002')]],
+        listAvailableAgents,
+    });
+    const w = buildProgressivePowerDialWorker(deps);
+    await w.tick();
+
+    // Only agent-uuid-a (status=available) gets a batch. Wrap-up, on-call,
+    // and break agents are filtered out before claiming begins.
+    assert.equal(rec.batchesCreated.length, 1);
+    assert.equal(rec.batchesCreated[0].agentId, 'agent-uuid-a');
+    assert.deepEqual(rec.agentsClaimed, ['agent-uuid-a']);
+    assert.ok(
+        !rec.legsOriginated.some((l) => l.batchId.includes('wrapup')),
+        'no leg routed to a wrap-up agent',
+    );
+});
