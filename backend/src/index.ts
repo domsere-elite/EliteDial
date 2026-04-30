@@ -33,6 +33,7 @@ import { validateEnvOrExit, validateActivationsOrWarn } from './lib/env-validati
 import { aiAutonomousWorker } from './services/ai-autonomous-worker';
 import { progressivePowerDialWorker } from './services/progressive-power-dial-worker';
 import { concurrencyLimiter } from './services/concurrency-limiter';
+import { wrapUpService } from './services/wrap-up-service';
 
 validateEnvOrExit();
 
@@ -137,12 +138,21 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 const server = http.createServer(app);
 setupSocketIO(server);
 
-server.listen(config.port, () => {
+server.listen(config.port, async () => {
     logger.info(`EliteDial backend running on port ${config.port}`);
     logger.info(`SignalWire configured: ${config.isSignalWireConfigured}`);
     logger.info(`Retell configured: ${config.isRetellConfigured}`);
     reservationCleanup.start();
     crmRetryQueue.start();
+
+    // Sweep expired wrap-ups before workers start so no agent is dispatched
+    // while in stale wrap-up state (e.g., after process restart).
+    try {
+        await wrapUpService.sweepExpiredWrapUps();
+    } catch (err) {
+        logger.error('wrap-up sweep failed at boot', { err });
+    }
+
     void (async () => {
         try {
             await validateActivationsOrWarn();

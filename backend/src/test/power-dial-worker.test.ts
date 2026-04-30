@@ -106,6 +106,7 @@ function makeDeps(overrides: Partial<ProgressivePowerDialWorkerDeps> & {
             return got;
         },
         pickDid: async () => '+13467760336',
+        sweepExpiredWrapUps: async () => 0, // no-op for tests
         callbackUrl: 'https://api.test',
         enabled: true,
         batchTtlSeconds: 60,

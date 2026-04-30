@@ -100,6 +100,7 @@ export interface ProgressivePowerDialWorkerDeps {
         statusUrl: string;
     }) => Promise<{ providerCallId: string } | null>;
     pickDid: (campaign: PowerDialCampaign, contact: PowerDialContact) => Promise<string | null>;
+    sweepExpiredWrapUps?: () => Promise<number>; // optional, defaults to wrapUpService
     callbackUrl: string;
     enabled: boolean;
     batchTtlSeconds: number;
@@ -136,6 +137,7 @@ export function buildProgressivePowerDialWorker(
         markLegFailed,
         originateLeg,
         pickDid,
+        sweepExpiredWrapUps,
         callbackUrl,
         enabled,
         batchTtlSeconds,
@@ -157,6 +159,9 @@ export function buildProgressivePowerDialWorker(
 
     async function runOnce(): Promise<void> {
         if (!enabled) return;
+
+        const sweep = sweepExpiredWrapUps || (() => wrapUpService.sweepExpiredWrapUps());
+        await sweep();
 
         const [agents, campaigns] = await Promise.all([
             listAvailableAgents(),
@@ -340,6 +345,7 @@ import { campaignReservationService } from './campaign-reservation-service';
 import { signalwireService } from './signalwire';
 import { didRouter } from './did-router';
 import { emitToUser } from '../lib/socket';
+import { wrapUpService } from './wrap-up-service';
 
 const defaultCallbackUrl =
     config.publicUrls?.backend || `http://localhost:${config.port}`;
@@ -477,6 +483,7 @@ export const progressivePowerDialWorker: ProgressivePowerDialWorker = buildProgr
     markLegFailed: defaultMarkLegFailed,
     originateLeg: defaultOriginateLeg,
     pickDid: defaultPickDid,
+    sweepExpiredWrapUps: () => wrapUpService.sweepExpiredWrapUps(),
     callbackUrl: defaultCallbackUrl,
     enabled: config.powerDial.workerEnabled,
     batchTtlSeconds: config.powerDial.batchTtlSeconds,
