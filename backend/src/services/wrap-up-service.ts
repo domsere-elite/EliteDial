@@ -1,3 +1,6 @@
+import { prisma } from '../lib/prisma';
+import { emitToUser } from '../lib/socket';
+
 export interface WrapUpDeps {
     prismaProfileFindUnique: (id: string) => Promise<{ id: string; status: string; wrapUpUntil: Date | null } | null>;
     prismaProfileUpdate: (id: string, data: { status?: string; wrapUpUntil?: Date | null }) => Promise<{ id: string; status: string; wrapUpUntil: Date | null }>;
@@ -53,3 +56,26 @@ export function buildWrapUpService(deps: WrapUpDeps): WrapUpService {
         },
     };
 }
+
+export const wrapUpService: WrapUpService = buildWrapUpService({
+    prismaProfileFindUnique: async (id) =>
+        prisma.profile.findUnique({
+            where: { id },
+            select: { id: true, status: true, wrapUpUntil: true },
+        }),
+    prismaProfileUpdate: async (id, data) =>
+        prisma.profile.update({
+            where: { id },
+            data,
+            select: { id: true, status: true, wrapUpUntil: true },
+        }),
+    prismaProfileUpdateMany: async (where, data) =>
+        prisma.profile.updateMany({ where, data }),
+    prismaFindExpiredWrapUps: async (asOf) =>
+        prisma.profile.findMany({
+            where: { status: 'wrap-up', wrapUpUntil: { lte: asOf } },
+            select: { id: true },
+        }),
+    emitToUser,
+    now: () => new Date(),
+});
