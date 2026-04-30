@@ -272,6 +272,11 @@ export class SignalWireService implements TelephonyProvider {
                         caller_id: params.callerIdNumber,
                         swml: inlineSwml,
                         status_url: statusUrl,
+                        // SignalWire only fires status_url callbacks for the events
+                        // listed here. Without status_events the status_url is silently
+                        // ignored — power-dial wrap-up + auto-resume require the
+                        // 'ended' event to flip Profile.status off on-call.
+                        status_events: ['answered', 'ended'],
                     },
                 }),
             });
@@ -323,6 +328,10 @@ export class SignalWireService implements TelephonyProvider {
                         // string here (parallel to YAML strings used elsewhere).
                         swml: JSON.stringify(params.swml),
                         status_url: params.statusUrl,
+                        // status_url is silently no-op'd unless status_events lists
+                        // which events to fire. We need 'ended' for the wrap-up
+                        // state machine to engage at call completion.
+                        status_events: ['answered', 'ended'],
                     },
                 }),
             });
