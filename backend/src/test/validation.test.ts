@@ -11,6 +11,7 @@ import {
     bulkDncImportSchema,
     transferSchema,
     resetPasswordSchema,
+    updateAgentStatusSchema,
 } from '../lib/validation';
 
 // ─── registerSchema ─────────────────────────────
@@ -263,4 +264,28 @@ test('updateCampaignSchema: dialRatio editable mid-campaign', () => {
 test('updateCampaignSchema: dialRatio bounds enforced', () => {
     assert.equal(updateCampaignSchema.safeParse({ dialRatio: 0 }).success, false);
     assert.equal(updateCampaignSchema.safeParse({ dialRatio: 10 }).success, false);
+});
+
+// ─── Phase 3b: wrap-up status and wrapUpSeconds ───
+
+test('updateAgentStatusSchema: wrap-up is accepted', () => {
+    const result = updateAgentStatusSchema.safeParse({ status: 'wrap-up' });
+    assert.equal(result.success, true);
+});
+
+test('updateAgentStatusSchema: invalid status rejected', () => {
+    const result = updateAgentStatusSchema.safeParse({ status: 'foobar' });
+    assert.equal(result.success, false);
+});
+
+test('updateCampaignSchema: wrapUpSeconds defaults to 30', () => {
+    const parsed = updateCampaignSchema.parse({ name: 'test' });
+    assert.equal(parsed.wrapUpSeconds, 30);
+});
+
+test('updateCampaignSchema: wrapUpSeconds bounds enforced (0-300)', () => {
+    assert.equal(updateCampaignSchema.safeParse({ name: 'x', wrapUpSeconds: -1 }).success, false);
+    assert.equal(updateCampaignSchema.safeParse({ name: 'x', wrapUpSeconds: 301 }).success, false);
+    assert.equal(updateCampaignSchema.safeParse({ name: 'x', wrapUpSeconds: 0 }).success, true);
+    assert.equal(updateCampaignSchema.safeParse({ name: 'x', wrapUpSeconds: 300 }).success, true);
 });

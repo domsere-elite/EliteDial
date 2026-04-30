@@ -38,7 +38,7 @@ export const registerSchema = z.object({
 
 // ─── Agent Schemas ───────────────────────────────
 export const updateAgentStatusSchema = z.object({
-    status: z.enum(['available', 'break', 'offline', 'on-call']),
+    status: z.enum(['available', 'break', 'offline', 'on-call', 'wrap-up']),
 });
 
 // ─── Call Schemas ────────────────────────────────
@@ -118,6 +118,7 @@ export const createCampaignSchema = z.object({
     // skipAmd default true: prefer speed for collections. AMD becomes opt-in
     // for compliance-sensitive lists.
     skipAmd: z.boolean().optional().default(true),
+    wrapUpSeconds: z.number().int().min(0).max(300).default(30),
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
 }).refine(
@@ -137,6 +138,7 @@ export const updateCampaignSchema = z.object({
     voicemailBehavior: voicemailBehaviorField.optional(),
     voicemailMessage: z.string().nullable().optional(),
     skipAmd: z.boolean().optional(),
+    wrapUpSeconds: z.number().int().min(0).max(300).default(30),
     retellAgentId: z.string().nullable().optional(),
     retellSipAddress: z.string().nullable().optional(),
 });
