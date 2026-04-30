@@ -20,7 +20,7 @@ const noop = {
     auditTrack: async () => undefined,
     prismaUpdateCall: async () => undefined,
     prismaFindCompletedCall: async () => null,
-    releaseAgent: async () => undefined,
+    enterWrapUp: async () => undefined,
     crmPostCallEvent: async () => undefined,
     reservationComplete: async () => undefined,
 } as const;
@@ -35,7 +35,7 @@ test('integration-progressive: ringing webhook updates attempt status to ringing
             id: 'call-r1', agentId: null, accountId: null,
             campaignAttempts: [{
                 id: 'att-r1', contactId: 'k-r1', campaignId: 'camp-r1',
-                contact: { id: 'k-r1', attemptCount: 0, campaign: { maxAttemptsPerLead: 3, retryDelaySeconds: 60 } },
+                contact: { id: 'k-r1', attemptCount: 0, campaign: { id: 'camp-r1', maxAttemptsPerLead: 3, retryDelaySeconds: 60, wrapUpSeconds: 30 } },
             }],
         }),
     });
@@ -61,7 +61,7 @@ test('integration-progressive: answered webhook updates attempt to in-progress w
             id: 'call-a1', agentId: null, accountId: null,
             campaignAttempts: [{
                 id: 'att-a1', contactId: 'k-a1', campaignId: 'camp-a1',
-                contact: { id: 'k-a1', attemptCount: 0, campaign: { maxAttemptsPerLead: 3, retryDelaySeconds: 60 } },
+                contact: { id: 'k-a1', attemptCount: 0, campaign: { id: 'camp-a1', maxAttemptsPerLead: 3, retryDelaySeconds: 60, wrapUpSeconds: 30 } },
             }],
         }),
     });
@@ -86,7 +86,7 @@ test('integration-progressive: no-answer + non-exhausted contact → queued with
             id: 'call-na1', agentId: null, accountId: null,
             campaignAttempts: [{
                 id: 'att-na1', contactId: 'k-na1', campaignId: 'camp-na1',
-                contact: { id: 'k-na1', attemptCount: 1, campaign: { maxAttemptsPerLead: 3, retryDelaySeconds: 300 } },
+                contact: { id: 'k-na1', attemptCount: 1, campaign: { id: 'camp-na1', maxAttemptsPerLead: 3, retryDelaySeconds: 300, wrapUpSeconds: 30 } },
             }],
         }),
         reservationComplete: async (contactId, status, retryAt) => {
@@ -119,7 +119,7 @@ test('integration-progressive: no-answer + exhausted contact → failed with no 
             id: 'call-ex1', agentId: null, accountId: null,
             campaignAttempts: [{
                 id: 'att-ex1', contactId: 'k-ex1', campaignId: 'camp-ex1',
-                contact: { id: 'k-ex1', attemptCount: 3, campaign: { maxAttemptsPerLead: 3, retryDelaySeconds: 300 } },
+                contact: { id: 'k-ex1', attemptCount: 3, campaign: { id: 'camp-ex1', maxAttemptsPerLead: 3, retryDelaySeconds: 300, wrapUpSeconds: 30 } },
             }],
         }),
         reservationComplete: async (contactId, status, retryAt) => {
@@ -147,7 +147,7 @@ test('integration-progressive: completed call always marks contact completed (ig
             id: 'call-cmp1', agentId: null, accountId: null,
             campaignAttempts: [{
                 id: 'att-cmp1', contactId: 'k-cmp1', campaignId: 'camp-cmp1',
-                contact: { id: 'k-cmp1', attemptCount: 3, campaign: { maxAttemptsPerLead: 3, retryDelaySeconds: 60 } },
+                contact: { id: 'k-cmp1', attemptCount: 3, campaign: { id: 'camp-cmp1', maxAttemptsPerLead: 3, retryDelaySeconds: 60, wrapUpSeconds: 30 } },
             }],
         }),
         prismaFindCompletedCall: async () => ({ id: 'call-cmp1', agentId: null, accountId: null }),

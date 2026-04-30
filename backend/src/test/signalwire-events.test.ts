@@ -13,10 +13,16 @@ type Update = {
     completedAt: Date | null;
 };
 
-const captured: { statusUpdates: Update[]; webhooksDispatched: Array<{ event: string; payload: unknown }>; recordingAttached: unknown[] } = {
+const captured: {
+    statusUpdates: Update[];
+    webhooksDispatched: Array<{ event: string; payload: unknown }>;
+    recordingAttached: unknown[];
+    wrapUpEntered: Array<{ agentId: string; wrapUpSeconds: number }>;
+} = {
     statusUpdates: [],
     webhooksDispatched: [],
     recordingAttached: [],
+    wrapUpEntered: [],
 };
 
 const fakeDeps = {
@@ -28,7 +34,7 @@ const fakeDeps = {
     prismaUpdateCampaignAttempt: async () => undefined,
     prismaFindCallWithAttempt: async () => null,
     prismaFindCompletedCall: async () => null,
-    releaseAgent: async () => undefined,
+    enterWrapUp: async (agentId: string, wrapUpSeconds: number) => { captured.wrapUpEntered.push({ agentId, wrapUpSeconds }); },
     crmPostCallEvent: async () => undefined,
     reservationComplete: async () => undefined,
 };
@@ -128,11 +134,11 @@ test('signalwire-events: completed status emits call.terminal with campaignId fr
             id: 'call-1', agentId: null, accountId: null,
             campaignAttempts: [{
                 id: 'a1', contactId: 'k1', campaignId: 'camp-x',
-                contact: { id: 'k1', attemptCount: 1, campaign: { maxAttemptsPerLead: 6, retryDelaySeconds: 600 } },
+                contact: { id: 'k1', attemptCount: 1, campaign: { id: 'camp-x', maxAttemptsPerLead: 6, retryDelaySeconds: 600, wrapUpSeconds: 30 } },
             }],
         }),
         prismaFindCompletedCall: async () => ({ id: 'call-1', agentId: null, accountId: null }),
-        releaseAgent: async () => undefined,
+        enterWrapUp: async () => undefined,
         crmPostCallEvent: async () => undefined,
         reservationComplete: async () => undefined,
     }));
@@ -146,4 +152,53 @@ test('signalwire-events: completed status emits call.terminal with campaignId fr
     assert.equal(seen[0].signalwireCallId, 'sw-call-1');
     assert.equal(seen[0].campaignId, 'camp-x');
     assert.equal(seen[0].status, 'completed');
+});
+
+test('POST /signalwire/events/call-status terminal state with agentId triggers enterWrapUp(default 30s)', async () => {
+    captured.wrapUpEntered = [];
+    const localFakes = {
+        ...fakeDeps,
+        prismaFindCompletedCall: async () => ({ agentId: 'agent-xyz', id: 'call-1', accountId: null }),
+    };
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/signalwire/events', createSignalwireEventsRouter(localFakes));
+
+    const res = await request(localApp)
+        .post('/signalwire/events/call-status')
+        .send({ call_id: 'c-1', call_state: 'ended', from: '+1', to: '+2', direction: 'outbound', duration: 10 });
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.wrapUpEntered.length, 1);
+    assert.equal(captured.wrapUpEntered[0].agentId, 'agent-xyz');
+    assert.equal(captured.wrapUpEntered[0].wrapUpSeconds, 30);
+});
+
+test('POST /signalwire/events/call-status terminal state with campaign-attempt uses Campaign.wrapUpSeconds', async () => {
+    captured.wrapUpEntered = [];
+    const localFakes = {
+        ...fakeDeps,
+        prismaFindCallWithAttempt: async () => ({
+            id: 'call-1',
+            agentId: null,
+            accountId: null,
+            campaignAttempts: [{
+                id: 'att-1',
+                contactId: 'con-1',
+                campaignId: 'camp-1',
+                contact: { id: 'con-1', attemptCount: 1, campaign: { id: 'camp-1', maxAttemptsPerLead: 6, retryDelaySeconds: 600, wrapUpSeconds: 60 } },
+            }],
+        }),
+        prismaFindCompletedCall: async () => ({ agentId: 'agent-xyz', id: 'call-1', accountId: null }),
+    };
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/signalwire/events', createSignalwireEventsRouter(localFakes));
+
+    const res = await request(localApp)
+        .post('/signalwire/events/call-status')
+        .send({ call_id: 'c-1', call_state: 'ended', from: '+1', to: '+2', direction: 'outbound', duration: 10 });
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.wrapUpEntered[0].wrapUpSeconds, 60);
 });

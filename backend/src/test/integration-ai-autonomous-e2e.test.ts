@@ -16,7 +16,7 @@ let findCallResult: {
         id: string;
         contactId: string;
         campaignId: string;
-        contact: { id: string; attemptCount: number; campaign: { maxAttemptsPerLead: number; retryDelaySeconds: number } };
+        contact: { id: string; attemptCount: number; campaign: { id: string; maxAttemptsPerLead: number; retryDelaySeconds: number; wrapUpSeconds: number } };
     }>;
 } | null = null;
 
@@ -31,7 +31,7 @@ eventsApp.use('/signalwire/events', createSignalwireEventsRouter({
     prismaUpdateCampaignAttempt: async () => undefined,
     prismaFindCallWithAttempt: async () => findCallResult,
     prismaFindCompletedCall: async () => null,
-    releaseAgent: async () => undefined,
+    enterWrapUp: async () => undefined,
     crmPostCallEvent: async () => undefined,
     reservationComplete: async () => undefined,
 }));
@@ -76,7 +76,7 @@ test('integration-e2e: HTTP completed webhook releases AI worker slot via shared
         id: 'internal-1', agentId: null, accountId: null,
         campaignAttempts: [{
             id: 'att-1', contactId: 'k1', campaignId: 'camp-e2e-1',
-            contact: { id: 'k1', attemptCount: 1, campaign: { maxAttemptsPerLead: 3, retryDelaySeconds: 60 } },
+            contact: { id: 'k1', attemptCount: 1, campaign: { id: 'camp-e2e-1', maxAttemptsPerLead: 3, retryDelaySeconds: 60, wrapUpSeconds: 30 } },
         }],
     };
 

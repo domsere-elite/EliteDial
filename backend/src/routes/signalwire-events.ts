@@ -8,6 +8,8 @@ import { campaignReservationService } from '../services/campaign-reservation-ser
 import { logger } from '../utils/logger';
 import { eventBus } from '../lib/event-bus';
 import { broadcastCallStatus } from '../lib/realtime';
+import { wrapUpService } from '../services/wrap-up-service';
+import { scheduleAutoResume } from '../services/wrap-up-scheduler';
 
 const SIGNALWIRE_STATE_MAP: Record<string, string> = {
     queued: 'initiated',
@@ -28,7 +30,7 @@ export interface SignalwireEventsDeps {
     prismaUpdateCampaignAttempt: typeof defaultPrismaUpdateCampaignAttempt;
     prismaFindCallWithAttempt: typeof defaultFindCallWithAttempt;
     prismaFindCompletedCall: typeof defaultFindCompletedCall;
-    releaseAgent: typeof defaultReleaseAgent;
+    enterWrapUp: typeof defaultEnterWrapUp;
     crmPostCallEvent: typeof defaultCrmPostCallEvent;
     reservationComplete: typeof defaultReservationComplete;
 }
@@ -93,7 +95,14 @@ async function defaultFindCallWithAttempt(callId: string) {
                         select: {
                             id: true,
                             attemptCount: true,
-                            campaign: { select: { maxAttemptsPerLead: true, retryDelaySeconds: true } },
+                            campaign: {
+                                select: {
+                                    id: true,
+                                    maxAttemptsPerLead: true,
+                                    retryDelaySeconds: true,
+                                    wrapUpSeconds: true,
+                                },
+                            },
                         },
                     },
                 },
@@ -109,8 +118,11 @@ async function defaultFindCompletedCall(callId: string) {
     });
 }
 
-async function defaultReleaseAgent(agentId: string) {
-    await prisma.profile.updateMany({ where: { id: agentId }, data: { status: 'available' } });
+async function defaultEnterWrapUp(agentId: string, wrapUpSeconds: number) {
+    const result = await wrapUpService.enterWrapUp(agentId, wrapUpSeconds);
+    if (result.transitioned) {
+        scheduleAutoResume(agentId, wrapUpSeconds);
+    }
 }
 
 async function defaultCrmPostCallEvent(payload: Parameters<typeof crmAdapter.postCallEvent>[0]) {
@@ -130,7 +142,7 @@ const defaultDeps: SignalwireEventsDeps = {
     prismaUpdateCampaignAttempt: defaultPrismaUpdateCampaignAttempt,
     prismaFindCallWithAttempt: defaultFindCallWithAttempt,
     prismaFindCompletedCall: defaultFindCompletedCall,
-    releaseAgent: defaultReleaseAgent,
+    enterWrapUp: defaultEnterWrapUp,
     crmPostCallEvent: defaultCrmPostCallEvent,
     reservationComplete: defaultReservationComplete,
 };
@@ -208,7 +220,8 @@ export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaul
         if (TERMINAL_STATES.has(mappedStatus)) {
             const completed = await deps.prismaFindCompletedCall(call_id);
             if (completed?.agentId) {
-                await deps.releaseAgent(completed.agentId);
+                const wrapUpSeconds = withAttempt?.campaignAttempts?.[0]?.contact?.campaign?.wrapUpSeconds ?? 30;
+                await deps.enterWrapUp(completed.agentId, wrapUpSeconds);
             }
             if (completed?.id) {
                 await deps.crmPostCallEvent({
