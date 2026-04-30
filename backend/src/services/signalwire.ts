@@ -113,28 +113,42 @@ export class SignalWireService implements TelephonyProvider {
         };
     }
 
-    // Idempotently set password and email on a subscriber. SignalWire's
-    // /api/fabric/subscribers/tokens endpoint auto-creates a subscriber when
-    // the reference doesn't match an existing one, but the auto-created
-    // subscriber has NO password and stores the reference (often a UUID) in
-    // the email field. Without a password, client.online() registration fails
-    // with code -32603 "WebRTC endpoint registration failed". And the PUT
-    // endpoint validates email format, so we must send a real email alongside
-    // the password.
-    private async ensureSubscriberPassword(subscriberId: string, reference: string, email: string): Promise<void> {
+    // Idempotently set the full profile (email, password, first/last/display name)
+    // on a subscriber. SignalWire's /api/fabric/subscribers/tokens auto-creates
+    // a subscriber when the reference doesn't match an existing one, but the
+    // auto-created sub has no password and stores the reference (UUID) in the
+    // email field. Without a password — and, empirically, without a populated
+    // display_name — client.online() registration fails with -32603
+    // "WebRTC endpoint registration failed". The PUT endpoint validates email
+    // format, so we send a real email alongside.
+    private async ensureSubscriberProfile(subscriberId: string, reference: string, email: string, agentName: string): Promise<void> {
         const password = derivedSubscriberPassword(reference);
+        // Best-effort split of agentName into first/last for the SignalWire profile.
+        // The dialer passes the agent's email in for agentName, so we fall back to
+        // local-part if no whitespace is present.
+        const trimmedName = agentName.includes('@') ? agentName.split('@')[0] : agentName;
+        const parts = trimmedName.trim().split(/\s+/);
+        const firstName = parts[0] || trimmedName;
+        const lastName = parts.length > 1 ? parts.slice(1).join(' ') : 'Agent';
+        const displayName = `${firstName} ${lastName}`;
         try {
             const resp = await this.fetchImpl(`${this.baseUrl}/api/fabric/subscribers/${subscriberId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: this.authHeader },
-                body: JSON.stringify({ email, password }),
+                body: JSON.stringify({
+                    email,
+                    password,
+                    first_name: firstName,
+                    last_name: lastName,
+                    display_name: displayName,
+                }),
             });
             if (!resp.ok) {
                 const errBody = await resp.text();
-                logger.warn('SignalWire ensureSubscriberPassword PUT failed', { status: resp.status, body: errBody, subscriberId, email });
+                logger.warn('SignalWire ensureSubscriberProfile PUT failed', { status: resp.status, body: errBody, subscriberId, email });
             }
         } catch (err) {
-            logger.warn('SignalWire ensureSubscriberPassword exception', { err, subscriberId });
+            logger.warn('SignalWire ensureSubscriberProfile exception', { err, subscriberId });
         }
     }
 
@@ -179,7 +193,7 @@ export class SignalWireService implements TelephonyProvider {
                 // token. SignalWire's PUT endpoint validates email format, so we must
                 // send a real email alongside the password.
                 if (existing.subscriberId) {
-                    await this.ensureSubscriberPassword(existing.subscriberId, reference, realEmail);
+                    await this.ensureSubscriberProfile(existing.subscriberId, reference, realEmail, agentName);
                 }
                 return existing;
             }
@@ -198,7 +212,7 @@ export class SignalWireService implements TelephonyProvider {
 
             const created = await this.requestSubscriberToken(reference);
             if (created.token && created.subscriberId) {
-                await this.ensureSubscriberPassword(created.subscriberId, reference, realEmail);
+                await this.ensureSubscriberProfile(created.subscriberId, reference, realEmail, agentName);
             }
             if (created.token) {
                 return { ...created, metadata: { ...(created.metadata || {}), reusedSubscriber: false, subscriberCreated: true } };
