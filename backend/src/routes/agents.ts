@@ -8,6 +8,7 @@ import { wrapUpService } from '../services/wrap-up-service';
 import { cancelAutoResume } from '../services/wrap-up-scheduler';
 import { signAgentRoomUrl } from '../lib/signed-url';
 import { config } from '../config';
+import { emitToUser } from '../lib/socket';
 
 const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
 
@@ -68,6 +69,13 @@ export function buildAgentsRouter(deps: AgentsRouterDeps = defaultDeps): Router 
             data: { status },
             select: { id: true, email: true, status: true },
         });
+
+        // Phase 3c: useAgentRoom (and any other listener) needs the status
+        // change pushed via Socket.IO; without this the dashboard's local
+        // useProfileStatus state stays stale after manual Avail/Break/Offline
+        // toggles. wrap-up-service already emits this for server-driven
+        // transitions; this mirrors it for client-driven ones.
+        emitToUser(id, 'profile.status', { status, wrapUpUntil: null, wrapUpSeconds: 0 });
 
         res.json(agent);
     });
