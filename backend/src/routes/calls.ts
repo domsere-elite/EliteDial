@@ -477,6 +477,7 @@ router.post('/browser-session', authenticate, validate(browserSessionSchema), as
 
     const baseUrl = getBackendBaseUrl(req);
     const originate = await signalwireService.originateAgentBrowserCall({
+        agentId: req.user!.id,
         agentSipReference,
         toNumber,
         callerIdNumber: selectedFromNumber,

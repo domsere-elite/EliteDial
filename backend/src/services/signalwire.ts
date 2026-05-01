@@ -225,6 +225,7 @@ export class SignalWireService implements TelephonyProvider {
     }
 
     async originateAgentBrowserCall(params: {
+        agentId: string;
         agentSipReference: string;
         toNumber: string;
         callerIdNumber: string;
@@ -237,17 +238,14 @@ export class SignalWireService implements TelephonyProvider {
 
         try {
             const statusUrl = `${params.callbackUrl}/signalwire/events/call-status`;
-            // PSTN-first origination: SignalWire dials the customer's cell, and once
-            // the customer answers, the inline SWML's `connect:` step routes the call
-            // to the agent's Fabric address /private/<ref>. The agent's browser
-            // receives a native Fabric notification (not a SIP invite) which the v3
-            // SDK handles correctly — verified live (cell rang on direct API test).
-            //
-            // Why not the reverse: dialing /private/<ref> first sends a SIP invite to
-            // the registered subscriber. The v3 browser SDK doesn't fully track
-            // SIP-invite-driven calls in its Fabric event store ("Got an unknown
-            // fabric event" warning), media negotiation never completes, and
-            // SignalWire tears the call down ~4s after answer with end_reason: hangup.
+            // PSTN-first origination: SignalWire dials the customer's cell. Once
+            // they answer, the inline SWML routes the call into the agent's
+            // pre-warm room first (Phase 3c — instant audio if the agent has
+            // status='available'), falling through to a cold connect on
+            // /private/<ref> if the moderator isn't there within 3s. Cold path
+            // matches the working pre-Phase-3c shape: native Fabric notification
+            // to the v3 SDK (not a SIP invite — that path tears down ~4s after
+            // answer).
             const fabricTarget = `/private/${params.agentSipReference}`;
             // Inline-object SWML — must be top-level sibling of params for
             // SignalWire to honour status_url callbacks.
@@ -256,6 +254,14 @@ export class SignalWireService implements TelephonyProvider {
                 sections: {
                     main: [
                         { answer: {} },
+                        {
+                            join_room: {
+                                name: `agent-room-${params.agentId}`,
+                                moderator: false,
+                                wait_for_moderator: true,
+                                timeout: 3,
+                            },
+                        },
                         { connect: { to: fabricTarget, timeout: 30, answer_on_bridge: true } },
                         { hangup: {} },
                     ],
@@ -288,7 +294,7 @@ export class SignalWireService implements TelephonyProvider {
             return {
                 provider: this.name,
                 providerCallId: data.id || data.call_id || '',
-                raw: { fabricTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber, transport: 'pstn-first-fabric-bridge' },
+                raw: { fabricTarget, callerIdNumber: params.callerIdNumber, toNumber: params.toNumber, transport: 'pstn-first-fabric-bridge-with-room' },
             };
         } catch (err) {
             logger.error('SignalWire agent-browser call origination error', { error: err });

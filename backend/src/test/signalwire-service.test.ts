@@ -143,7 +143,7 @@ test('signalwire-service: initiateOutboundCall serializes swmlQuery into URL', a
     assert.match(body.params.url, /from=%2B15551112222/);
 });
 
-test('originateAgentBrowserCall posts dial to=PSTN with inline SWML connecting to /private/<ref>', async () => {
+test('originateAgentBrowserCall posts dial with inline SWML — join_room then connect fallback', async () => {
     const fetchMock = mock.fn(async (url: string, init?: any) => {
         assert.equal(url, 'https://test.signalwire.com/api/calling/calls');
         const body = JSON.parse(init.body);
@@ -151,14 +151,23 @@ test('originateAgentBrowserCall posts dial to=PSTN with inline SWML connecting t
         assert.equal(body.params.from, '+13467760336', 'from is the DID');
         assert.equal(body.params.to, '+18327979834', 'to is the customer PSTN number — dialed first');
         assert.equal(body.params.caller_id, '+13467760336');
-        // SWML is the top-level inline-object form (sibling of params), required
-        // for SignalWire to honour status_url/status_events callbacks.
         assert.equal(typeof body.swml, 'object', 'inline SWML object provided');
         assert.equal(body.swml.version, '1.0.0');
         const main = body.swml.sections.main;
         assert.ok(Array.isArray(main));
         assert.deepEqual(main[0], { answer: {} });
-        assert.equal(main[1].connect.to, '/private/agent-uuid-1', 'connects to agent Fabric address after customer answers');
+        // Step 1: join_room (warm path).
+        assert.ok(main[1].join_room, 'join_room step present');
+        assert.equal(main[1].join_room.name, 'agent-room-agent-uuid-1');
+        assert.equal(main[1].join_room.wait_for_moderator, true);
+        assert.equal(main[1].join_room.timeout, 3);
+        assert.equal(main[1].join_room.moderator, false);
+        // Step 2: cold-bridge fallback connect to /private/<ref>.
+        assert.equal(main[2].connect.to, '/private/agent-uuid-1');
+        assert.equal(main[2].connect.timeout, 30);
+        assert.equal(main[2].connect.answer_on_bridge, true);
+        // Step 3: trailing hangup.
+        assert.deepEqual(main[3], { hangup: {} });
         assert.match(body.params.status_url, /\/signalwire\/events\/call-status/);
         assert.deepEqual(body.params.status_events, ['answered', 'ended']);
         return makeResponse(200, { id: 'sw-call-42' });
@@ -166,6 +175,7 @@ test('originateAgentBrowserCall posts dial to=PSTN with inline SWML connecting t
 
     const svc = new SignalWireService(config, { fetch: fetchMock as unknown as typeof fetch });
     const result = await svc.originateAgentBrowserCall({
+        agentId: 'agent-uuid-1',
         agentSipReference: 'agent-uuid-1',
         toNumber: '+18327979834',
         callerIdNumber: '+13467760336',
@@ -182,6 +192,7 @@ test('originateAgentBrowserCall returns null when REST origin fails', async () =
     const fetchMock = mock.fn(async () => makeResponse(422, { error: 'invalid_target' }));
     const svc = new SignalWireService(config, { fetch: fetchMock as unknown as typeof fetch });
     const result = await svc.originateAgentBrowserCall({
+        agentId: 'agent-uuid-1',
         agentSipReference: 'agent-uuid-1',
         toNumber: '+18327979834',
         callerIdNumber: '+13467760336',
@@ -194,6 +205,7 @@ test('originateAgentBrowserCall returns mock id when service unconfigured', asyn
     const fetchMock = mock.fn(async () => { throw new Error('should not be called'); });
     const svc = new SignalWireService({ ...config, projectId: '' }, { fetch: fetchMock as unknown as typeof fetch });
     const result = await svc.originateAgentBrowserCall({
+        agentId: 'agent-uuid-1',
         agentSipReference: 'agent-uuid-1',
         toNumber: '+18327979834',
         callerIdNumber: '+13467760336',
