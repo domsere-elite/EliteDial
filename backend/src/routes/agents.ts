@@ -6,6 +6,8 @@ import { signalwireService } from '../services/signalwire';
 import { validate, updateAgentStatusSchema } from '../lib/validation';
 import { wrapUpService } from '../services/wrap-up-service';
 import { cancelAutoResume } from '../services/wrap-up-scheduler';
+import { signAgentRoomUrl } from '../lib/signed-url';
+import { config } from '../config';
 
 const paramValue = (value: string | string[] | undefined): string => (Array.isArray(value) ? value[0] : (value || ''));
 
@@ -109,6 +111,26 @@ export function buildAgentsRouter(deps: AgentsRouterDeps = defaultDeps): Router 
             },
             dispositions,
         });
+    });
+
+    // GET /api/agents/:id/room-url — Phase 3c: mint a short-lived signed URL the
+    // frontend passes to client.dial(...) to enter the agent's pre-warm room.
+    // Agent can only mint for themselves; supervisor/admin can mint for anyone.
+    router.get('/:id/room-url', authenticate, (req: Request, res: Response): void => {
+        const id = paramValue(req.params.id);
+        if (req.user!.role === 'agent' && req.user!.id !== id) {
+            res.status(403).json({ error: 'Cannot mint room URL for another agent' });
+            return;
+        }
+        const secret = process.env.SWML_URL_SIGNING_SECRET || config.signalwire.apiToken;
+        if (!secret) {
+            res.status(500).json({ error: 'signing_secret_unset' });
+            return;
+        }
+        const backend = config.publicUrls.backend || process.env.BACKEND_PUBLIC_URL || '';
+        const { sig, exp } = signAgentRoomUrl(id, 60, secret); // 60-second TTL
+        const url = `${backend}/swml/agent-room/${id}?sig=${sig}&exp=${exp}`;
+        res.json({ url, exp });
     });
 
     // GET /api/agents/token — get SignalWire browser token for current agent

@@ -15,7 +15,9 @@ import {
     bridgeOutboundAiSwml,
     transferSwml,
     hangupSwml,
+    agentRoomSwml,
 } from '../services/swml/builder';
+import { verifyAgentRoomSignature } from '../lib/signed-url';
 
 const backendBase = (req: Request): string =>
     config.publicUrls.backend || `${req.protocol}://${req.get('host')}`;
@@ -285,6 +287,27 @@ const defaultDeps: SwmlRouteDeps = {
 
 export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
     const router = Router();
+
+    // POST /swml/agent-room/:agentId — Phase 3c per-agent pre-warm room SWML.
+    // Signed URL keyed by agentId; SignalWire fetches this server-to-server
+    // when the frontend's client.dial(...) hits it, so we cannot rely on
+    // session auth — HMAC signing closes that gap.
+    router.post('/agent-room/:agentId', (req: Request, res: Response): void => {
+        const agentId = String(req.params.agentId || '');
+        const sig = String(req.query.sig || '');
+        const exp = Number(req.query.exp || 0);
+        const secret = process.env.SWML_URL_SIGNING_SECRET || config.signalwire.apiToken;
+        if (!secret) {
+            res.status(500).json({ error: 'signing_secret_unset' });
+            return;
+        }
+        const verified = verifyAgentRoomSignature(agentId, sig, exp, secret);
+        if (!verified.ok) {
+            res.status(403).json({ error: verified.reason });
+            return;
+        }
+        res.json(agentRoomSwml({ agentId }));
+    });
 
     // POST /swml/inbound
     router.post('/inbound', (req: Request, res: Response): void => {

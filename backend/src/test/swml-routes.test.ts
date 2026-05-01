@@ -316,3 +316,56 @@ test('swml-routes: /power-dial/voicemail — missing legId returns { ack: false 
     assert.equal(res.status, 200);
     assert.deepEqual(res.body, { ack: false });
 });
+
+// ---- /swml/agent-room/:agentId — Phase 3c per-agent pre-warm room ---------
+
+test('POST /swml/agent-room/:agentId — returns agentRoomSwml when sig is valid', async () => {
+    const SECRET = 'test-secret-room';
+    process.env.SWML_URL_SIGNING_SECRET = SECRET;
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/swml', createSwmlRouter(mkDeps()));
+
+    const { signAgentRoomUrl } = await import('../lib/signed-url');
+    const { sig, exp } = signAgentRoomUrl('agent-uuid-1', 60, SECRET);
+
+    const res = await request(localApp).post(`/swml/agent-room/agent-uuid-1?sig=${sig}&exp=${exp}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.version, '1.0.0');
+    assert.equal(res.body.sections.main[1].join_room.name, 'agent-room-agent-uuid-1');
+    assert.equal(res.body.sections.main[1].join_room.moderator, true);
+});
+
+test('POST /swml/agent-room/:agentId — 403 on missing sig', async () => {
+    process.env.SWML_URL_SIGNING_SECRET = 'test-secret-room';
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/swml', createSwmlRouter(mkDeps()));
+    const res = await request(localApp).post('/swml/agent-room/agent-uuid-1');
+    assert.equal(res.status, 403);
+});
+
+test('POST /swml/agent-room/:agentId — 403 on tampered sig', async () => {
+    const SECRET = 'test-secret-room';
+    process.env.SWML_URL_SIGNING_SECRET = SECRET;
+    const { signAgentRoomUrl } = await import('../lib/signed-url');
+    const { exp } = signAgentRoomUrl('agent-uuid-1', 60, SECRET);
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/swml', createSwmlRouter(mkDeps()));
+    const res = await request(localApp).post(`/swml/agent-room/agent-uuid-1?sig=deadbeef&exp=${exp}`);
+    assert.equal(res.status, 403);
+});
+
+test('POST /swml/agent-room/:agentId — 403 on expired sig', async () => {
+    const SECRET = 'test-secret-room';
+    process.env.SWML_URL_SIGNING_SECRET = SECRET;
+    const { signAgentRoomUrl } = await import('../lib/signed-url');
+    const { sig } = signAgentRoomUrl('agent-uuid-1', -60, SECRET); // already expired
+    const exp = Math.floor(Date.now() / 1000) - 30;
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/swml', createSwmlRouter(mkDeps()));
+    const res = await request(localApp).post(`/swml/agent-room/agent-uuid-1?sig=${sig}&exp=${exp}`);
+    assert.equal(res.status, 403);
+});
