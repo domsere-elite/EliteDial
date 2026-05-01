@@ -324,6 +324,8 @@ export interface PowerDialDetectParams {
     campaignId: string;
     callerId: string;     // DID, threaded into URL params
     targetRef: string;    // agent email local-part for /private/<ref>
+    /** Phase 3c — used to derive `agent-room-{agentId}` for the pre-warm join_room. */
+    agentId: string;
     retellSipAddress?: string | null; // campaign's AI overflow target, if configured
     voicemailBehavior: 'hangup' | 'leave_message';
     voicemailMessage?: string | null;
@@ -342,15 +344,23 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
     const hasRetell = !!(p.retellSipAddress && p.retellSipAddress.length > 0);
     const willLeaveMessage = p.voicemailBehavior === 'leave_message' && !!(p.voicemailMessage && p.voicemailMessage.length > 0);
 
-    // Bridge target is statically known at origination time, so we hard-code it
-    // into the bridge section.
-    //
-    // No TTS hold here — Phase 3a (skipAmd=true) gets the customer to the
-    // bridge in <1s of post-answer time, and the WebRTC negotiation completes
-    // within 3-5s. The agent's softphone audio is up before the customer
-    // notices any silence. If WebRTC ever regresses or AMD is re-enabled
-    // (skipAmd=false), the play step would need to come back.
+    // Phase 3c bridge: try the warm room first (agent has been in
+    // agent-room-<id> while their status is available, so PC is already
+    // negotiated). wait_for_moderator with a 3s timeout covers the race
+    // window between worker.batch.armed and customer answer. If the
+    // moderator never shows (agent room dial failed, network blip,
+    // status flicker), the SWML falls through to the cold-bridge connect
+    // — same path Phase 3a used. System is never WORSE than today; in
+    // the happy path it's <500ms vs the current 3-5s.
     const bridgeSection: SwmlStep[] = [
+        {
+            join_room: {
+                name: `agent-room-${p.agentId}`,
+                moderator: false,
+                wait_for_moderator: true,
+                timeout: 3,
+            },
+        },
         {
             connect: {
                 to: `/private/${p.targetRef}`,
