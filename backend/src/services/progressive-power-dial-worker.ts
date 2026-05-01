@@ -257,7 +257,6 @@ export function buildProgressivePowerDialWorker(
                     campaignId: campaign.id,
                     callerId: fromNumber,
                     targetRef,
-                    agentId: agent.id,
                     retellSipAddress: campaign.retellSipAddress,
                     voicemailBehavior: (campaign.voicemailBehavior === 'leave_message' ? 'leave_message' : 'hangup'),
                     voicemailMessage: campaign.voicemailMessage,

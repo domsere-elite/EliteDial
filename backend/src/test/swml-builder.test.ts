@@ -156,7 +156,6 @@ const baseDetectParams = {
     campaignId: 'camp-1',
     callerId: '+13467760336',
     targetRef: 'dominic',
-    agentId: 'agent-fixture',
     retellSipAddress: null as string | null,
     voicemailBehavior: 'hangup' as 'hangup' | 'leave_message',
     voicemailMessage: null as string | null,
@@ -240,32 +239,22 @@ test('swml-builder: powerDialDetectSwml — leave_message without message degrad
     assert.ok(steps.some((s: any) => s.hangup !== undefined), 'still hangs up cleanly');
 });
 
-test('swml-builder: powerDialDetectSwml — bridge section join_rooms agent-room then falls through to connect /private/<targetRef>', () => {
-    const doc = powerDialDetectSwml({ ...baseDetectParams, targetRef: 'dominic', agentId: 'agent-uuid-9' });
+test('swml-builder: powerDialDetectSwml — bridge section connects to /private/<targetRef> with no TTS hold', () => {
+    const doc = powerDialDetectSwml({ ...baseDetectParams, targetRef: 'dominic' });
     const bridge = doc.sections.bridge as any[];
     assert.ok(bridge, 'bridge section present');
 
-    // No TTS hold — Phase 3a removed it; Phase 3c keeps that.
-    assert.ok(!bridge.some((s: any) => s.play !== undefined), 'no TTS hold');
+    // skipAmd=true gets customer to bridge in <1s, WebRTC completes in ~3s,
+    // so no TTS audio masking is needed. Bridge is just connect + hangup.
+    assert.ok(!bridge.some((s: any) => s.play !== undefined), 'no TTS hold (was needed for AMD path; not for skipAmd path)');
 
-    // Step 0: join_room with wait_for_moderator + timeout (Phase 3c warm path).
-    const joinStep = bridge[0] as any;
-    assert.ok(joinStep.join_room, 'first step is join_room');
-    assert.equal(joinStep.join_room.name, 'agent-room-agent-uuid-9');
-    assert.equal(joinStep.join_room.wait_for_moderator, true);
-    assert.equal(joinStep.join_room.timeout, 3);
-    assert.equal(joinStep.join_room.moderator, false);
-
-    // Step 1: cold-bridge fallback connect (system never worse than today).
-    const connectStep = bridge[1] as any;
-    assert.ok(connectStep.connect, 'fallback connect step after join_room');
-    assert.equal(connectStep.connect.to, '/private/dominic');
-    assert.equal(connectStep.connect.from, undefined, 'no from: — mirrors working softphone shape');
-    assert.equal(connectStep.connect.answer_on_bridge, true);
-    assert.equal(connectStep.connect.timeout, 30);
-
-    // Step 2: trailing hangup.
-    assert.deepEqual(bridge[2], { hangup: {} });
+    const connect = bridge.find((s: any) => s.connect !== undefined);
+    assert.ok(connect, 'connect step present');
+    assert.equal(connect.connect.to, '/private/dominic');
+    assert.equal(connect.connect.from, undefined, 'no from: — mirrors working softphone shape');
+    assert.equal(connect.connect.answer_on_bridge, true);
+    assert.equal(connect.connect.timeout, 30);
+    assert.ok(bridge.some((s: any) => s.hangup !== undefined), 'trailing hangup');
 });
 
 test('swml-builder: powerDialDetectSwml — overflow_ai connects to retellSipAddress when configured', () => {
