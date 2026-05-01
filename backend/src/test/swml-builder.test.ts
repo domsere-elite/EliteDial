@@ -11,6 +11,7 @@ import {
     hangupSwml,
     bridgeOutboundAiSwml,
     powerDialDetectSwml,
+    agentRoomSwml,
 } from '../services/swml/builder';
 
 test('swml-builder: inbound IVR presents 3-option menu with action callback', () => {
@@ -328,4 +329,27 @@ test('swml-builder: powerDialDetectSwml(skipAmd=true) — claim URL still embeds
     assert.match(req.request.url, /legId=l-9/);
     assert.match(req.request.url, /campaignId=c-3/);
     assert.match(req.request.url, /callerId=%2B13467760336/);
+});
+
+// ---- agentRoomSwml (Phase 3c per-agent pre-warm room) -----------------------
+
+test('swml-builder: agentRoomSwml builds moderator join_room with end_conference_on_exit', () => {
+    const doc = agentRoomSwml({ agentId: 'agent-uuid-123' });
+    assert.equal(doc.version, '1.0.0');
+    const main = doc.sections.main;
+    assert.deepEqual(main[0], { answer: {} });
+    const joinStep = main[1] as any;
+    assert.ok(joinStep.join_room, 'join_room step present');
+    assert.equal(joinStep.join_room.name, 'agent-room-agent-uuid-123');
+    assert.equal(joinStep.join_room.moderator, true);
+    assert.equal(joinStep.join_room.start_conference_on_enter, true);
+    assert.equal(joinStep.join_room.end_conference_on_exit, true);
+    assert.equal(joinStep.join_room.muted, false);
+    assert.deepEqual(main[2], { hangup: {} }, 'hangup after room ends');
+});
+
+test('swml-builder: agentRoomSwml — agentId is encoded into the room name verbatim', () => {
+    const doc = agentRoomSwml({ agentId: 'unusual+chars/in_id' });
+    const joinStep = doc.sections.main[1] as any;
+    assert.equal(joinStep.join_room.name, 'agent-room-unusual+chars/in_id');
 });

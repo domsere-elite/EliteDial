@@ -448,3 +448,32 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
         },
     };
 }
+
+export interface AgentRoomParams {
+    agentId: string;
+}
+
+// Per-agent moderator room used to keep the WebRTC PeerConnection warm so
+// customer legs can `join_room` into an already-negotiated session and get
+// instant audio (Phase 3c). Lifecycle is bound to Profile.status === 'available';
+// `end_conference_on_exit: true` ties the room's death to the agent leaving.
+export function agentRoomSwml(params: AgentRoomParams): SwmlDocument {
+    return {
+        version: '1.0.0',
+        sections: {
+            main: [
+                { answer: {} },
+                {
+                    join_room: {
+                        name: `agent-room-${params.agentId}`,
+                        moderator: true,
+                        start_conference_on_enter: true,
+                        end_conference_on_exit: true,
+                        muted: false,
+                    },
+                },
+                { hangup: {} },
+            ],
+        },
+    };
+}
