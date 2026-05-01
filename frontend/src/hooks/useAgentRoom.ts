@@ -55,10 +55,14 @@ export function useAgentRoom(): AgentRoomState {
 
     async function enterRoom(agentId: string): Promise<void> {
         try {
+            console.info('[useAgentRoom] enterRoom: GET /agents/<id>/room-url', { agentId });
             const { data } = await api.get(`/agents/${agentId}/room-url`);
             const url = data?.url;
+            console.info('[useAgentRoom] mint response', { url: url?.substring(0, 80) });
             if (!url) throw new Error('no room url');
+            const t0 = performance.now();
             const session = await sw.dialRoom(url);
+            console.info('[useAgentRoom] dialRoom resolved', { ms: Math.round(performance.now() - t0), hasSession: !!session });
             if (!session) {
                 setRoomError('dialRoom returned null');
                 return;
@@ -68,6 +72,7 @@ export function useAgentRoom(): AgentRoomState {
             setRoomError(null);
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Failed to enter room';
+            console.error('[useAgentRoom] enterRoom failed', err);
             setInRoom(false);
             setRoomError(message);
             // Customer legs still get cold-bridge fallback per spec — non-fatal.
@@ -75,13 +80,23 @@ export function useAgentRoom(): AgentRoomState {
     }
 
     async function reconcile(status: ProfileStatus): Promise<void> {
-        if (inflightRef.current) return;
+        if (inflightRef.current) {
+            console.info('[useAgentRoom] reconcile skipped (inflight)');
+            return;
+        }
         inflightRef.current = true;
         try {
             const wantInRoom = status === 'available' || status === 'wrap-up' || status === 'on-call';
+            console.info('[useAgentRoom] reconcile', { status, wantInRoom, hasSession: !!sessionRef.current, hasUserId: !!user?.id, swConnected: sw.connected });
             if (wantInRoom && !sessionRef.current) {
-                if (!user?.id) return;
-                if (!sw.connected) return; // wait for connect; second effect will retry
+                if (!user?.id) {
+                    console.info('[useAgentRoom] reconcile bailed: no user.id');
+                    return;
+                }
+                if (!sw.connected) {
+                    console.info('[useAgentRoom] reconcile bailed: sw not connected');
+                    return;
+                }
                 await enterRoom(user.id);
             } else if (!wantInRoom && sessionRef.current) {
                 await leaveRoom();
@@ -92,6 +107,8 @@ export function useAgentRoom(): AgentRoomState {
     }
 
     // Debounced status reconciler — flutters get one reconciliation, not many.
+    // Includes user.id and sw.connected in deps so a status change that
+    // arrived before either was ready gets retried when they become ready.
     useEffect(() => {
         if (debounceRef.current) clearTimeout(debounceRef.current);
         const targetStatus = profile.status;
@@ -102,17 +119,7 @@ export function useAgentRoom(): AgentRoomState {
             if (debounceRef.current) clearTimeout(debounceRef.current);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [profile.status]);
-
-    // On socket reconnect, re-enter if still wantInRoom but session was lost.
-    useEffect(() => {
-        if (!sw.connected) return;
-        const wantInRoom = profile.status === 'available' || profile.status === 'wrap-up' || profile.status === 'on-call';
-        if (!wantInRoom) return;
-        if (sessionRef.current) return;
-        void reconcile(profile.status);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sw.connected, profile.status]);
+    }, [profile.status, user?.id, sw.connected]);
 
     return { inRoom, roomError };
 }
