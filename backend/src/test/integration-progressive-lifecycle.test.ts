@@ -23,6 +23,8 @@ const noop = {
     enterWrapUp: async () => undefined,
     crmPostCallEvent: async () => undefined,
     reservationComplete: async () => undefined,
+    resolveAgentFromRoomName: async () => null,
+    defaultWrapUpSeconds: 30,
 } as const;
 
 test('integration-progressive: ringing webhook updates attempt status to ringing', async () => {

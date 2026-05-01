@@ -34,6 +34,8 @@ eventsApp.use('/signalwire/events', createSignalwireEventsRouter({
     enterWrapUp: async () => undefined,
     crmPostCallEvent: async () => undefined,
     reservationComplete: async () => undefined,
+    resolveAgentFromRoomName: async () => null,
+    defaultWrapUpSeconds: 30,
 }));
 
 test('integration-e2e: HTTP completed webhook releases AI worker slot via shared eventBus', async () => {

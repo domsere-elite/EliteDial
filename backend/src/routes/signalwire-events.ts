@@ -33,6 +33,10 @@ export interface SignalwireEventsDeps {
     enterWrapUp: typeof defaultEnterWrapUp;
     crmPostCallEvent: typeof defaultCrmPostCallEvent;
     reservationComplete: typeof defaultReservationComplete;
+    /** Phase 3c — maps a conference room name (`agent-room-<id>`) back to the agent id. */
+    resolveAgentFromRoomName: (roomName: string) => Promise<string | null>;
+    /** Phase 3c — wrap-up duration for non-campaign-tagged conference exits. */
+    defaultWrapUpSeconds: number;
 }
 
 async function defaultCallSessionUpdate(params: {
@@ -174,6 +178,13 @@ async function defaultReservationComplete(contactId: string, status: string, ret
     await campaignReservationService.completeReservation(contactId, status as any, retryAt);
 }
 
+// Phase 3c rooms are named `agent-room-<agentId>`. Strip the prefix to recover the id.
+async function defaultResolveAgentFromRoomName(roomName: string): Promise<string | null> {
+    if (!roomName.startsWith('agent-room-')) return null;
+    const id = roomName.slice('agent-room-'.length);
+    return id || null;
+}
+
 const defaultDeps: SignalwireEventsDeps = {
     callSessionUpdate: defaultCallSessionUpdate,
     callSessionAddRecording: defaultAddRecording,
@@ -186,6 +197,8 @@ const defaultDeps: SignalwireEventsDeps = {
     enterWrapUp: defaultEnterWrapUp,
     crmPostCallEvent: defaultCrmPostCallEvent,
     reservationComplete: defaultReservationComplete,
+    resolveAgentFromRoomName: defaultResolveAgentFromRoomName,
+    defaultWrapUpSeconds: 30,
 };
 
 export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaultDeps): Router {
@@ -332,6 +345,30 @@ export function createSignalwireEventsRouter(deps: SignalwireEventsDeps = defaul
             logger.error('Failed to persist recording', { error: err, call_id });
         }
         res.status(200).json({ status: 'ok' });
+    });
+
+    // Phase 3c — conference-level callbacks fire on participant events for
+    // the agent's pre-warm room. We listen for participant-leave on
+    // non-moderators (= the customer leaving the bridge) to flip the agent
+    // into wrap-up. Moderator leaves correspond to the agent going
+    // offline/break and are handled client-side by useAgentRoom hangup,
+    // not via this webhook.
+    router.post('/conference-status', async (req: Request, res: Response): Promise<void> => {
+        const body = req.body || {};
+        const params = body.params || {};
+        const event = String(params.event || '');
+        const roomName = String(params.room_name || '');
+        const participant = params.participant || {};
+        const isModerator = !!participant.is_moderator;
+
+        if (event === 'participant-leave' && !isModerator) {
+            const agentId = await deps.resolveAgentFromRoomName(roomName);
+            if (agentId) {
+                await deps.enterWrapUp(agentId, deps.defaultWrapUpSeconds);
+            }
+        }
+
+        res.json({ status: 'ok' });
     });
 
     return router;

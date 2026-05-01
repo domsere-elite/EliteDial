@@ -306,7 +306,8 @@ export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
             res.status(403).json({ error: verified.reason });
             return;
         }
-        res.json(agentRoomSwml({ agentId }));
+        const statusUrl = `${backendBase(req)}/signalwire/events/conference-status`;
+        res.json(agentRoomSwml({ agentId, statusUrl }));
     });
 
     // POST /swml/inbound

@@ -37,6 +37,8 @@ const fakeDeps = {
     enterWrapUp: async (agentId: string, wrapUpSeconds: number) => { captured.wrapUpEntered.push({ agentId, wrapUpSeconds }); },
     crmPostCallEvent: async () => undefined,
     reservationComplete: async () => undefined,
+    resolveAgentFromRoomName: async (name: string) => name.startsWith('agent-room-') ? name.slice('agent-room-'.length) : null,
+    defaultWrapUpSeconds: 30,
 };
 
 const app = express();
@@ -141,6 +143,8 @@ test('signalwire-events: completed status emits call.terminal with campaignId fr
         enterWrapUp: async () => undefined,
         crmPostCallEvent: async () => undefined,
         reservationComplete: async () => undefined,
+        resolveAgentFromRoomName: async () => null,
+        defaultWrapUpSeconds: 30,
     }));
 
     await request(app)
@@ -201,4 +205,79 @@ test('POST /signalwire/events/call-status terminal state with campaign-attempt u
 
     assert.equal(res.status, 200);
     assert.equal(captured.wrapUpEntered[0].wrapUpSeconds, 60);
+});
+
+// ---- /signalwire/events/conference-status — Phase 3c room-status webhook --
+
+test('POST /signalwire/events/conference-status — participant-leave for non-moderator triggers enterWrapUp on agent', async () => {
+    captured.wrapUpEntered = [];
+    const localFakes: any = {
+        ...fakeDeps,
+        resolveAgentFromRoomName: async (name: string) => name.startsWith('agent-room-') ? name.slice('agent-room-'.length) : null,
+        defaultWrapUpSeconds: 30,
+    };
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/signalwire/events', createSignalwireEventsRouter(localFakes));
+
+    const res = await request(localApp)
+        .post('/signalwire/events/conference-status')
+        .send({
+            event_type: 'calling.call.conference',
+            params: {
+                event: 'participant-leave',
+                room_name: 'agent-room-agent-xyz',
+                participant: { is_moderator: false, call_id: 'sw-call-1' },
+            },
+        });
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.wrapUpEntered.length, 1);
+    assert.equal(captured.wrapUpEntered[0].agentId, 'agent-xyz');
+    assert.equal(captured.wrapUpEntered[0].wrapUpSeconds, 30);
+});
+
+test('POST /signalwire/events/conference-status — participant-leave for moderator does NOT trigger enterWrapUp', async () => {
+    captured.wrapUpEntered = [];
+    const localFakes: any = {
+        ...fakeDeps,
+        resolveAgentFromRoomName: async (name: string) => name.startsWith('agent-room-') ? name.slice('agent-room-'.length) : null,
+        defaultWrapUpSeconds: 30,
+    };
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/signalwire/events', createSignalwireEventsRouter(localFakes));
+
+    const res = await request(localApp)
+        .post('/signalwire/events/conference-status')
+        .send({
+            event_type: 'calling.call.conference',
+            params: {
+                event: 'participant-leave',
+                room_name: 'agent-room-agent-xyz',
+                participant: { is_moderator: true, call_id: 'sw-call-2' },
+            },
+        });
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.wrapUpEntered.length, 0, 'moderator leave does not trigger wrap-up');
+});
+
+test('POST /signalwire/events/conference-status — non-room_name event is ignored', async () => {
+    captured.wrapUpEntered = [];
+    const localFakes: any = {
+        ...fakeDeps,
+        resolveAgentFromRoomName: async () => null,
+        defaultWrapUpSeconds: 30,
+    };
+    const localApp = express();
+    localApp.use(express.json());
+    localApp.use('/signalwire/events', createSignalwireEventsRouter(localFakes));
+
+    const res = await request(localApp)
+        .post('/signalwire/events/conference-status')
+        .send({ params: { event: 'participant-leave', room_name: 'unrelated-room', participant: { is_moderator: false } } });
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.wrapUpEntered.length, 0);
 });

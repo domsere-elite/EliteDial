@@ -364,3 +364,17 @@ test('swml-builder: agentRoomSwml — agentId is encoded into the room name verb
     const joinStep = doc.sections.main[1] as any;
     assert.equal(joinStep.join_room.name, 'agent-room-unusual+chars/in_id');
 });
+
+test('swml-builder: agentRoomSwml — statusUrl wires conference-level callbacks', () => {
+    const doc = agentRoomSwml({ agentId: 'a-1', statusUrl: 'https://x.test/signalwire/events/conference-status' });
+    const join = (doc.sections.main[1] as any).join_room;
+    assert.equal(join.status_url, 'https://x.test/signalwire/events/conference-status');
+    assert.deepEqual(join.status_events, ['conference-start', 'conference-end', 'participant-join', 'participant-leave']);
+});
+
+test('swml-builder: agentRoomSwml — no statusUrl means no status_url/status_events on join_room', () => {
+    const doc = agentRoomSwml({ agentId: 'a-1' });
+    const join = (doc.sections.main[1] as any).join_room;
+    assert.equal(join.status_url, undefined);
+    assert.equal(join.status_events, undefined);
+});

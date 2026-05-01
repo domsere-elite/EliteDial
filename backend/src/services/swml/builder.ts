@@ -461,6 +461,12 @@ export function powerDialDetectSwml(p: PowerDialDetectParams): SwmlDocument {
 
 export interface AgentRoomParams {
     agentId: string;
+    /**
+     * Optional conference-level callback URL. When set, SignalWire fires
+     * participant-join / participant-leave / conference-end events to this URL.
+     * Used by Phase 3c to flip the agent into wrap-up when the customer leaves.
+     */
+    statusUrl?: string;
 }
 
 // Per-agent moderator room used to keep the WebRTC PeerConnection warm so
@@ -468,20 +474,23 @@ export interface AgentRoomParams {
 // instant audio (Phase 3c). Lifecycle is bound to Profile.status === 'available';
 // `end_conference_on_exit: true` ties the room's death to the agent leaving.
 export function agentRoomSwml(params: AgentRoomParams): SwmlDocument {
+    const joinRoom: Record<string, unknown> = {
+        name: `agent-room-${params.agentId}`,
+        moderator: true,
+        start_conference_on_enter: true,
+        end_conference_on_exit: true,
+        muted: false,
+    };
+    if (params.statusUrl) {
+        joinRoom.status_url = params.statusUrl;
+        joinRoom.status_events = ['conference-start', 'conference-end', 'participant-join', 'participant-leave'];
+    }
     return {
         version: '1.0.0',
         sections: {
             main: [
                 { answer: {} },
-                {
-                    join_room: {
-                        name: `agent-room-${params.agentId}`,
-                        moderator: true,
-                        start_conference_on_enter: true,
-                        end_conference_on_exit: true,
-                        muted: false,
-                    },
-                },
+                { join_room: joinRoom },
                 { hangup: {} },
             ],
         },
