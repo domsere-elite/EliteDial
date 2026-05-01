@@ -13,7 +13,7 @@ Replace the per-call cold WebRTC negotiation (current 3-5 seconds of customer-si
 
 **Goal:** post-answer-to-audio under 500ms (industry-leading). Floor: never worse than today's 5s (graceful fallback to current `connect: /private/<ref>`).
 
-**Scope:** power-dial bridges only. Manual outbound and inbound stay on current flow (Phase 3d candidates).
+**Scope:** power-dial bridges + manual outbound bridges. Inbound stays on current flow (Phase 3d).
 
 ---
 
@@ -94,6 +94,9 @@ Serves the SWML from the builder. Authenticates the agent via session/token (TBD
 **Modified: `powerDialDetectSwml` builder**
 The bridge section changes from a single `connect: /private/<ref>` step to a 2-step sequence: `join_room` first, then `connect` as fallback. Builder gets a new param `agentId` so it can derive the room name. Tests updated.
 
+**Modified: `originateAgentBrowserCall` (manual outbound)**
+The inline SWML built inside this function changes from `connect: /private/<ref>` to the same 2-step `join_room` + `connect` fallback. Agent ID is already known at origination time (the agent initiated the call), passed as a new parameter. Tests updated.
+
 **New (optional, recommended): `backend/src/routes/signalwire-events.ts` — conference-status handler**
 Endpoint at `POST /signalwire/events/conference-status`. Listens for `conference-end` and `participant-leave` events. May incidentally provide the reliable termination signal that `status_url` failed to deliver in Phase 3b — if so, we'd retire the SWML-driven webhook fallback we parked.
 
@@ -112,11 +115,16 @@ Endpoint at `POST /signalwire/events/conference-status`. Listens for `conference
 
 ### Out of scope (explicit non-goals)
 
-- Manual outbound (`originateAgentBrowserCall`) — unchanged
-- Inbound calls — unchanged
+- Inbound calls — Phase 3d (see Phase 3d Notes below)
 - Supervisor monitor-listen via room — possible Phase 3d
 - Recording at room level — possible Phase 3d
 - Room reuse across logout/login — room dies on logout, fresh on next login
+
+### Phase 3d notes (captured for future, not implemented in 3c)
+
+**Inbound UX direction:** inbound calls should NOT auto-route to whichever agent is available. Instead: when an inbound call arrives, the dialer surfaces a popup to all available agents (ring-all) with an option to accept. First agent to click "Answer" gets the bridge. This is a different lifecycle than power-dial (which is auto-bridge after worker dispatch), so the inbound room model needs its own design pass — agent assignment happens AFTER the customer is already in a holding state, not before SWML serves.
+
+This note captures the user's stated direction so it's preserved across sessions; full design happens when Phase 3d kicks off.
 
 ---
 
@@ -258,14 +266,15 @@ This alternative is documented here so a spike-failure pivot doesn't require a f
 ## Migration plan
 
 1. **Phase 0:** Spike on temp branch. ~2-4 hours.
-2. **Phase 1:** Build `agentRoomSwml` builder + route + tests. ~half a day.
+2. **Phase 1:** Build `agentRoomSwml` builder + signed-URL route + tests. ~half a day.
 3. **Phase 2:** Build `useAgentRoom` frontend hook + tests. ~half a day.
-4. **Phase 3:** Modify `powerDialDetectSwml` for `join_room` + fallback. Test all existing power-dial test cases still pass with the new structure. ~half a day.
-5. **Phase 4:** Conference-status webhook handler (optional but recommended). Wire to wrap-up service. ~half a day.
-6. **Phase 5:** Deploy to prod, smoke test against `+18327979834` (real cell), measure post-answer-to-audio timing. If < 500ms target hit → ship; if not → diagnose.
-7. **Phase 6:** Write Phase 3c shipped handoff. Decide whether to extend room model to manual outbound and inbound (Phase 3d).
+4. **Phase 3:** Modify `powerDialDetectSwml` for `join_room` + fallback. Test all existing power-dial test cases still pass. ~half a day.
+5. **Phase 4:** Modify `originateAgentBrowserCall` (manual outbound) for same `join_room` + fallback pattern. Tests updated. ~half a day.
+6. **Phase 5:** Conference-status webhook handler (optional but recommended). Wire to wrap-up service. ~half a day.
+7. **Phase 6:** Deploy to prod, smoke test against `+18327979834` (real cell), measure post-answer-to-audio timing. If < 500ms target hit → ship; if not → diagnose.
+8. **Phase 7:** Write Phase 3c shipped handoff. Phase 3d kicks off the inbound redesign separately.
 
-Total estimated effort: ~3-4 days from spike-success to prod ship.
+Total estimated effort: ~4-5 days from spike-success to prod ship (added half-day for manual outbound).
 
 ---
 
