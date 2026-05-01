@@ -286,6 +286,50 @@ const defaultDeps: SwmlRouteDeps = {
 export function createSwmlRouter(deps: SwmlRouteDeps = defaultDeps): Router {
     const router = Router();
 
+    // SPIKE — Phase 3c WebRTC pre-warm validation.
+    // Remove these two routes (and the customer-dial script) once spike concludes.
+    router.post('/spike-agent-room', (_req: Request, res: Response): void => {
+        res.json({
+            version: '1.0.0',
+            sections: {
+                main: [
+                    { answer: {} },
+                    {
+                        join_room: {
+                            name: 'spike-room-test',
+                            moderator: true,
+                            start_conference_on_enter: true,
+                            end_conference_on_exit: true,
+                            muted: false,
+                        },
+                    },
+                    { hangup: {} },
+                ],
+            },
+        });
+    });
+    router.post('/spike-customer-room', (_req: Request, res: Response): void => {
+        res.json({
+            version: '1.0.0',
+            sections: {
+                main: [
+                    { answer: {} },
+                    {
+                        join_room: {
+                            name: 'spike-room-test',
+                            wait_for_moderator: true,
+                            timeout: 3,
+                        },
+                    },
+                    // If join_room above timed out without a moderator, fall through
+                    // to a TTS marker so the spike can detect H2 (timeout fallback).
+                    { say: { text: 'Spike fallback path taken. Wait for moderator timed out.' } },
+                    { hangup: {} },
+                ],
+            },
+        });
+    });
+
     // POST /swml/inbound
     router.post('/inbound', (req: Request, res: Response): void => {
         const { call_id, from, to } = req.body || {};
