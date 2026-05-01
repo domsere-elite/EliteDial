@@ -495,41 +495,6 @@ export function useSignalWire() {
         return sessionResp;
     }, [connect]);
 
-    /**
-     * Phase 3c spike — dial a Fabric address (e.g. `/swml/spike-agent-room`)
-     * to enter a pre-warm conference room. Returns the resolved Fabric room
-     * session so the caller can hang up later (or null on failure).
-     *
-     * Note: SignalWire v3 SDK's client.dial accepts a Fabric address string
-     * via `{ to }`. Whether arbitrary `/swml/<route>` paths resolve to the
-     * backend's SWML handler is part of the spike's H3 hypothesis.
-     */
-    const dialRoom = useCallback(async (toAddress: string): Promise<FabricRoomSession | null> => {
-        if (!clientRef.current) {
-            await connect();
-        }
-        if (!clientRef.current) {
-            setState((prev) => ({ ...prev, error: 'SignalWire client not connected' }));
-            return null;
-        }
-        try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const client = clientRef.current as any;
-            const session: FabricRoomSession = await client.dial({
-                to: toAddress,
-                rootElement: ensureMediaRoot(),
-                audio: true,
-                video: false,
-            });
-            return session;
-        } catch (err) {
-            const message = err instanceof Error ? err.message : 'dialRoom failed';
-            console.error('[useSignalWire] dialRoom failed', err);
-            setState((prev) => ({ ...prev, error: message }));
-            return null;
-        }
-    }, [connect, ensureMediaRoot]);
-
     const acceptIncoming = useCallback(async () => {
         const invite = pendingInviteRef.current;
         if (!invite) return;
@@ -646,7 +611,6 @@ export function useSignalWire() {
         ...state,
         connect,
         dial,
-        dialRoom,
         hangup,
         toggleMute,
         toggleHold,

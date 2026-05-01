@@ -2,13 +2,13 @@ import { prisma } from '../src/lib/prisma';
 
 async function main() {
     const batches = await prisma.powerDialBatch.findMany({
+        where: { createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) } },
         orderBy: { createdAt: 'desc' },
-        take: 3,
         include: {
             legs: { select: { id: true, status: true, providerCallId: true, contactId: true, claimedAgent: true } },
         },
     });
-    console.log('RECENT POWER DIAL BATCHES:');
+    console.log(`POWER DIAL BATCHES IN LAST HOUR: ${batches.length}`);
     console.log(JSON.stringify(batches, null, 2));
 
     const lastBatch = batches[0];

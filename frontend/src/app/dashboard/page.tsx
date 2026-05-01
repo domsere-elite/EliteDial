@@ -94,10 +94,6 @@ export default function DashboardPage() {
     const [transferTarget, setTransferTarget] = useState('');
     const [transferring, setTransferring] = useState(false);
     const [secondsLeft, setSecondsLeft] = useState(0);
-    // SPIKE — Phase 3c. Remove with the spike button below once H1/H2/H3 validated.
-    const [spikeBusy, setSpikeBusy] = useState(false);
-    const [spikeMsg, setSpikeMsg] = useState<string>('');
-    const spikeSessionRef = useRef<unknown>(null);
 
     const wasOnCallRef = useRef(false);
     const activeOutboundContextRef = useRef<{ toNumber: string; fromNumber: string } | null>(null);
@@ -273,48 +269,6 @@ export default function DashboardPage() {
 
     const pushDigit = (digit: string) => setDialNumber((n) => n + digit);
 
-    // SPIKE — Phase 3c WebRTC pre-warm validation. Remove this whole block
-    // (state, handlers, button) after H1/H2/H3 are validated.
-    const handleSpikeJoinRoom = async () => {
-        if (spikeBusy) return;
-        setSpikeBusy(true);
-        setSpikeMsg('connecting...');
-        const t0 = performance.now();
-        try {
-            // Spike H3: does v3 SDK resolve a `/swml/<path>` address via client.dial?
-            const session = await sw.dialRoom('/swml/spike-agent-room');
-            const ms = Math.round(performance.now() - t0);
-            if (session) {
-                spikeSessionRef.current = session;
-                setSpikeMsg(`in room (${ms}ms) — H3 PASS`);
-                console.info('[spike] room session resolved', { ms, session });
-            } else {
-                setSpikeMsg(`dial returned null (${ms}ms) — H3 FAIL`);
-            }
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            setSpikeMsg(`error: ${message} — H3 FAIL`);
-            console.error('[spike] join room failed', err);
-        } finally {
-            setSpikeBusy(false);
-        }
-    };
-    const handleSpikeLeaveRoom = async () => {
-        const session = spikeSessionRef.current as { hangup?: () => Promise<void> } | null;
-        if (!session?.hangup) {
-            setSpikeMsg('no active session');
-            return;
-        }
-        try {
-            await session.hangup();
-            spikeSessionRef.current = null;
-            setSpikeMsg('left room');
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            setSpikeMsg(`leave error: ${message}`);
-        }
-    };
-
     /* ── Derived UI state ─────────────────────────────────────────── */
 
     const phase: 'idle' | 'incoming' | 'outbound-ring' | 'connected' | 'wrap-up' =
@@ -355,30 +309,6 @@ export default function DashboardPage() {
                     {sw.error}
                 </div>
             )}
-
-            {/* SPIKE — Phase 3c WebRTC pre-warm validation. Remove this block once spike concludes. */}
-            <div className="glass-panel" style={{ padding: '10px 16px', marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.82rem' }}>SPIKE: Phase 3c room</span>
-                    <button
-                        className="btn btn-secondary"
-                        onClick={handleSpikeJoinRoom}
-                        disabled={spikeBusy || !sw.connected}
-                    >
-                        {spikeBusy ? 'Joining...' : 'Join Room'}
-                    </button>
-                    <button
-                        className="btn btn-secondary"
-                        onClick={handleSpikeLeaveRoom}
-                        disabled={spikeBusy}
-                    >
-                        Leave Room
-                    </button>
-                    <span className="mono" style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        {spikeMsg || '(idle — click Join Room then run customer-dial script)'}
-                    </span>
-                </div>
-            </div>
 
             {/* Collapsible Dial Pad */}
             <div className="glass-panel" style={{ padding: dialPadOpen ? 20 : '10px 16px', transition: 'padding 0.2s ease' }}>
