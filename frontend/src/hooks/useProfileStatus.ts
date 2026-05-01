@@ -19,7 +19,7 @@ export interface ProfileStatusState {
 }
 
 export function useProfileStatus(initialStatus: ProfileStatus = 'offline'): ProfileStatusState {
-    const { on, off } = useRealtime();
+    const { on, off, connected } = useRealtime();
     const [status, setStatus] = useState<ProfileStatus>(initialStatus);
     const [wrapUpUntil, setWrapUpUntil] = useState<Date | null>(null);
     const [wrapUpSeconds, setWrapUpSeconds] = useState<number>(0);
@@ -34,6 +34,12 @@ export function useProfileStatus(initialStatus: ProfileStatus = 'offline'): Prof
         return () => { cancelled = true; };
     }, []);
 
+    // Re-hydrate from REST when the socket connects, so a status change that
+    // happened while the socket was disconnected (or before initial connect)
+    // gets picked up. This also covers the bug where useSocket.on/off are
+    // useCallback([]) refs and silently no-op when subscribed before the
+    // socket exists — by re-running the subscription effect on connect, we
+    // both rehydrate AND re-subscribe.
     useEffect(() => {
         const handler = (e: ProfileStatusEvent) => {
             setStatus(e.status);
@@ -41,8 +47,16 @@ export function useProfileStatus(initialStatus: ProfileStatus = 'offline'): Prof
             setWrapUpSeconds(e.wrapUpSeconds);
         };
         on('profile.status', handler);
+        // If we just connected (or reconnected), pull fresh state in case
+        // we missed events while disconnected.
+        if (connected) {
+            api.get('/agents/me/status').then(({ data }) => {
+                setStatus(data.status as ProfileStatus);
+                setWrapUpUntil(data.wrapUpUntil ? new Date(data.wrapUpUntil) : null);
+            }).catch(() => { /* non-fatal */ });
+        }
         return () => off('profile.status', handler);
-    }, [on, off]);
+    }, [on, off, connected]);
 
     return { status, wrapUpUntil, wrapUpSeconds };
 }
