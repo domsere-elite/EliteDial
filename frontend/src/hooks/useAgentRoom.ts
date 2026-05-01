@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import api from '@/lib/api';
-import { useSignalWire } from './useSignalWire';
 import { useProfileStatus, type ProfileStatus } from './useProfileStatus';
 import { useAuth } from './useAuth';
 
@@ -11,6 +10,16 @@ const ROOM_DEBOUNCE_MS = 500;
 interface AgentRoomState {
     inRoom: boolean;
     roomError: string | null;
+}
+
+// We accept the SignalWire surface as an argument rather than calling
+// useSignalWire() ourselves because useSignalWire is NOT a singleton —
+// each call site creates its own React state instance with its own
+// clientRef. The dashboard owns the canonical instance; we reuse it.
+interface SignalWireSurface {
+    connected: boolean;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    dialRoom: (toAddress: string) => Promise<any | null>;
 }
 
 // Phase 3c — keeps the agent's WebRTC PeerConnection warm by dialing a
@@ -26,9 +35,8 @@ interface AgentRoomState {
 //
 // Resilience: on Socket.IO reconnect, if status is still wantInRoom but
 // we don't have a session, redial.
-export function useAgentRoom(): AgentRoomState {
+export function useAgentRoom(sw: SignalWireSurface): AgentRoomState {
     const { user } = useAuth();
-    const sw = useSignalWire();
     const profile = useProfileStatus();
 
     const [inRoom, setInRoom] = useState(false);

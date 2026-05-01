@@ -81,7 +81,7 @@ export default function DashboardPage() {
     const sw = useSignalWire();
     const { on, off, connected: socketConnected } = useRealtime();
     const profile = useProfileStatus();
-    const room = useAgentRoom();
+    const room = useAgentRoom(sw);
 
     const [recentCalls, setRecentCalls] = useState<CallRecord[]>([]);
     const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
