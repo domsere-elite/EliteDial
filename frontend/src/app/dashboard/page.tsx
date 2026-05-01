@@ -5,6 +5,7 @@ import { useCallTimer } from '@/hooks/useCallTimer';
 import { useSignalWire } from '@/hooks/useSignalWire';
 import { useRealtime } from '@/components/RealtimeProvider';
 import { useProfileStatus } from '@/hooks/useProfileStatus';
+import { useAgentRoom } from '@/hooks/useAgentRoom';
 import api from '@/lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
@@ -80,6 +81,7 @@ export default function DashboardPage() {
     const sw = useSignalWire();
     const { on, off, connected: socketConnected } = useRealtime();
     const profile = useProfileStatus();
+    const room = useAgentRoom();
 
     const [recentCalls, setRecentCalls] = useState<CallRecord[]>([]);
     const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null);
@@ -300,6 +302,9 @@ export default function DashboardPage() {
                     <p style={{ color: 'var(--text-muted)', marginTop: 4 }}>
                         {sw.connected ? 'Softphone connected.' : sw.error || 'Connecting softphone...'}
                         {socketConnected ? ' Real-time live.' : ' Real-time offline.'}
+                        {room.inRoom && ' Bridge ready.'}
+                        {!room.inRoom && profile.status === 'available' && ' Bridge connecting...'}
+                        {room.roomError && ` Room error: ${room.roomError}`}
                     </p>
                 </div>
             </div>

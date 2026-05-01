@@ -495,6 +495,33 @@ export function useSignalWire() {
         return sessionResp;
     }, [connect]);
 
+    // Phase 3c — dial a Fabric address (e.g. backend `/swml/agent-room/<id>`
+    // signed URL) to enter a pre-warm conference room. Returns the resolved
+    // session so the caller can hang up later, or null on failure. Caller
+    // (useAgentRoom) supplies the address; this hook stays agnostic.
+    const dialRoom = useCallback(async (toAddress: string): Promise<FabricRoomSession | null> => {
+        if (!clientRef.current) {
+            await connect();
+        }
+        if (!clientRef.current) {
+            return null;
+        }
+        try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const client = clientRef.current as any;
+            const session: FabricRoomSession = await client.dial({
+                to: toAddress,
+                rootElement: ensureMediaRoot(),
+                audio: true,
+                video: false,
+            });
+            return session;
+        } catch (err) {
+            console.error('[useSignalWire] dialRoom failed', err);
+            return null;
+        }
+    }, [connect, ensureMediaRoot]);
+
     const acceptIncoming = useCallback(async () => {
         const invite = pendingInviteRef.current;
         if (!invite) return;
@@ -611,6 +638,7 @@ export function useSignalWire() {
         ...state,
         connect,
         dial,
+        dialRoom,
         hangup,
         toggleMute,
         toggleHold,
